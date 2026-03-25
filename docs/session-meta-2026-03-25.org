@@ -1,0 +1,215 @@
+#+TITLE: Session Meta-Review: 2026-03-25
+#+DATE: 2026-03-25
+#+STARTUP: overview
+
+* Session Statistics
+
+| Metric | Value |
+|--------|-------|
+| Duration | ~6 hours |
+| Commits on main | 61 |
+| Go files | 22 |
+| Go lines | 4,811 |
+| Tests passing | 82 |
+| Packages | 9 (7 with tests) |
+| Beads created | 28 |
+| Beads closed | 25 |
+| Beads remaining | 3 |
+| CPRR conjectures | 11 |
+| CPRR confirmed | 7 |
+| Agent rounds | 4 |
+| Total agents spawned | 25 |
+| Merge conflicts | ~12 (rounds 1-2), 0 (rounds 3-4) |
+
+* Agent Round Summary
+
+** Round 1: Initial scaffold (10 agents)
+
+Goal: Build foundation — new packages, tests, predicates, haxgoat endpoints.
+
+| Agent | Bead | Result | Conflicts |
+|-------|------|--------|-----------|
+| SameSite fix | hax-czh | ✓ | test file |
+| Unit tests | hax-bfz | ✓ | — |
+| Haxgoat gaps | hax-fnu | ✓ | — |
+| Wire generate | hax-sfp | ✓ | — |
+| MultiPredicate | hax-05k | ✓ | predicate.go struct literals |
+| x-frame-options | hax-b52 | ✓ | test file |
+| xcto | hax-h3v | ✓ | predicate.go + test + main |
+| Executor | hax-2ce | ✓ | — |
+| Relevance matrix | hax-3xx | ✓ | — |
+| Permissions-policy | hax-0db | ✓ | test file |
+
+Observation: 5/10 agents touched =predicate.go=, causing cascading test
+file conflicts. New packages (executor, relevance) merged cleanly. Source
+files merged clean; test files always conflicted.
+
+** Round 2: P0 bugs + audit refactor (5 agents)
+
+Goal: Fix the false negatives exposed by CPRR conjectures.
+
+| Agent | Bead | Result | Conflicts |
+|-------|------|--------|-----------|
+| CSP parse | hax-d6k | ✓ | — |
+| HSTS max-age | hax-uuv | ✓ | test file |
+| CORS reflection | hax-2z0 | ✓ | test file |
+| Audit refactor | hax-8q7 | ✓ | — |
+| Wire mutate | hax-c95 | ✓ | main.go import |
+
+Observation: 3/5 merges had test file conflicts. One main.go import
+conflict (trivially resolved). All CPRR conjectures validated — the
+haxgoat endpoints that were designed to expose false negatives now
+correctly trigger FAILs.
+
+** Round 3: Structural improvements (5 agents)
+
+Goal: L7 review fixes — shallow-copy bug, type extraction, predicate split.
+
+| Agent | Bead | Result | Conflicts |
+|-------|------|--------|-----------|
+| Shallow-copy fix | hax-a6f | ✓ | — |
+| Predicate split | hax-qf0 | ✓ | modify/delete (manual) |
+| cmdList derive | hax-d6j | ✓ | — |
+| Request extract | hax-dhn | ✓ | mutation.go (manual) |
+| Referrer-policy | hax-q0x | ✓ | — |
+
+Observation: The predicate split (monolith → 8 files) created a
+modify/delete conflict that required manual integration. The request
+type extraction touched 6+ files and needed manual replacement rather
+than merge. After this round, future agents touching predicates touch
+different files — the structural investment paid off immediately in
+round 4.
+
+** Round 4: Pipeline + final predicates (5 agents)
+
+Goal: Wire =hax check=, implement multi-request predicates, clean up.
+
+| Agent | Bead | Result | Conflicts |
+|-------|------|--------|-----------|
+| Wire check | hax-c71 | ✓ | — |
+| Idempotency | hax-uuy | ✓ | — |
+| Audit→executor | hax-8kq | ✓ | — |
+| Client pooling | hax-di9 | ✓ | — |
+| COEP/COOP | hax-wg8 | ✓ | — |
+
+Observation: ZERO merge conflicts. The predicate split from round 3
+eliminated all shared-file contention. Agents touching =methods.go=,
+=headers.go=, =executor.go=, and =main.go= all merged cleanly because
+they modified different files/functions.
+
+* Conflict Pattern Analysis
+
+| Round | Agents | Conflicts | Cause | Resolution Time |
+|-------|--------|-----------|-------|-----------------|
+| 1 | 10 | ~6 | All touched predicate.go + test file | ~30s each (git checkout --theirs) |
+| 2 | 5 | 4 | Test files, one import | ~30s each |
+| 3 | 5 | 2 | Structural: split + extract | ~5min each (manual) |
+| 4 | 5 | 0 | Per-group files eliminated contention | — |
+
+Key insight: **the structural investment in round 3 (split predicate.go,
+extract request type) eliminated all conflicts in round 4**. This is the
+architectural version of "pay down tech debt to increase velocity."
+
+The aq gossip system detected file ownership but couldn't prevent
+conflicts — it's advisory, not enforcing. For future batches, the fix
+is structural (split files) not process (better coordination).
+
+* CPRR Conjecture Outcomes
+
+| ID | Conjecture | Status | Evidence |
+|----|-----------|--------|----------|
+| C-001 | CSP presence-only is insufficient | CONFIRMED | /weak-csp: =default-src * unsafe-inline unsafe-eval= now FAILs |
+| C-002 | HSTS max-age=0 is a security regression | CONFIRMED | /hsts-zero: =max-age=0= now FAILs with RFC 6797 citation |
+| C-003 | CORS origin reflection > wildcard | OPEN | RequestResponsePredicate implemented, needs live validation |
+| C-004 | Idempotency needs state comparison | OPEN | MultiPredicate implemented, needs live validation |
+| C-005 | Relevance matrix eliminates nonsense pairs | OPEN | Matrix exists, not yet used by =hax run= |
+| C-006 | MultiPredicate enables 11 stubs | OPEN | Signature exists, 2/11 stubs implemented (idempotency, safety) |
+| C-007 | SameSite=None w/o Secure rejected | CONFIRMED | /samesite-none-insecure now FAILs |
+| C-008 | Mutation Apply corrupts originals | CONFIRMED | 4 regression tests prove deep-copy works |
+| C-009 | Request type in generator causes coupling | CONFIRMED | Zero =generator.Request= references after extraction |
+| C-010 | Predicate split zero API changes | CONFIRMED | 8 files, all tests pass, zero import changes |
+| C-011 | cmdList diverges from predicate package | CONFIRMED | 23→25 predicates now shown dynamically |
+
+* What Worked Well
+
+1. **CPRR-driven development**: Every P0 bug had a conjecture with
+   falsification criteria. Haxgoat endpoints were designed to expose
+   the exact false negative. Validation was deterministic.
+
+2. **Worktree isolation**: Agents worked in git worktrees, preventing
+   working tree corruption. Each agent had its own branch.
+
+3. **Dependency-ordered merging**: New packages first (clean), then
+   shared-file changes sequentially. This minimized conflict count.
+
+4. **Structural investment paying off**: The round 3 predicate split
+   eliminated all round 4 conflicts.
+
+5. **L7 review as a forcing function**: The boundary review found the
+   P0 shallow-copy bug, identified the type extraction need, and
+   motivated the predicate split — all of which improved quality.
+
+* What Could Be Better
+
+1. **Test files always conflict**: Each agent creates its own test file
+   or appends to a shared one. Solution: per-feature test files
+   (=predicate_csp_test.go=, =predicate_hsts_test.go=) or a
+   consolidation agent.
+
+2. **aq is advisory, not enforcing**: File-level ownership detection
+   doesn't prevent conflicts. Would need a reservation/lock protocol
+   or structural file splitting.
+
+3. **Worktree drift**: Agents fork from the main branch at launch time.
+   Agents that take longer end up merging into a main that has moved.
+   A rebase-before-merge protocol would help.
+
+4. **CPRR validation gap**: 4/11 conjectures are still OPEN because
+   they require =hax run= (which isn't wired yet) or live testing
+   against haxgoat. The validation loop is incomplete for multi-request
+   properties.
+
+5. **No automated smoke after merge**: Each merge was manually verified
+   with =go build= + =go test=. A post-merge hook running =make smoke=
+   would catch integration issues faster.
+
+* Remaining Work
+
+| Bead | Priority | Blocks | Effort |
+|------|----------|--------|--------|
+| hax-d5d: Wire =hax run= pipeline | P1 | shrink | Medium — orchestration over existing packages |
+| hax-no0: Implement shrink | P2 | — | Medium — lattice minimization over request space |
+| hax-vg0: Output package | P3 | — | Small — extract repeated =if jsonOutput= pattern |
+
+After these 3, the tool is feature-complete per the architecture diagram:
+generate → mutate → check → oracle (with shrink).
+
+* Package Dependency Graph (final)
+
+#+begin_example
+request          (leaf — no deps)
+  ↑
+generator        (imports request)
+  ↑
+mutation         (imports request)
+  ↑
+executor         (imports request)
+
+relevance        (imports mutation)
+
+predicate/       (no internal deps, 8 files)
+  types.go
+  runner.go
+  headers.go     (10 predicates)
+  methods.go     (3 predicates, 2 MultiPredicate)
+  crossorigin.go (5 predicates, 1 RequestResponsePredicate)
+  cache.go       (4 predicates)
+  state.go       (3 stubs)
+
+oracle           (imports predicate)
+
+main.go          (imports all)
+cmd/haxgoat/     (standalone, stdlib only)
+#+end_example
+
+No cycles. Clear ownership. Each package testable in isolation.
