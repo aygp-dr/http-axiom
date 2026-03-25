@@ -91,17 +91,98 @@ func checkHSTS(resp *http.Response) Result {
 	return Result{"headers", "hsts", "pass", val}
 }
 
+// parseCookieAttrs extracts the cookie name, SameSite value, and presence of
+// Secure and HttpOnly flags from a raw Set-Cookie header string.
+func parseCookieAttrs(raw string) (name, sameSiteVal string, hasSecure, hasHttpOnly, hasSameSite bool) {
+	parts := strings.Split(raw, ";")
+	// First part is the name=value pair.
+	if len(parts) > 0 {
+		nv := strings.TrimSpace(parts[0])
+		if eq := strings.IndexByte(nv, '='); eq > 0 {
+			name = nv[:eq]
+		} else {
+			name = nv
+		}
+	}
+	for _, part := range parts[1:] {
+		attr := strings.TrimSpace(part)
+		attrLower := strings.ToLower(attr)
+		if attrLower == "secure" {
+			hasSecure = true
+		} else if attrLower == "httponly" {
+			hasHttpOnly = true
+		} else if strings.HasPrefix(attrLower, "samesite") {
+			hasSameSite = true
+			if eq := strings.IndexByte(attr, '='); eq >= 0 {
+				sameSiteVal = strings.TrimSpace(attr[eq+1:])
+			}
+		}
+	}
+	return
+}
+
 func checkSameSite(resp *http.Response) Result {
 	cookies := resp.Header.Values("Set-Cookie")
 	if len(cookies) == 0 {
 		return Result{"headers", "samesite", "skip", "no cookies set"}
 	}
-	for _, c := range cookies {
-		if !strings.Contains(strings.ToLower(c), "samesite") {
-			return Result{"headers", "samesite", "warn", "cookie missing SameSite attribute"}
+
+	var details []string
+	worstStatus := "pass" // pass < warn < fail
+
+	for _, raw := range cookies {
+		name, sameSiteVal, hasSecure, hasHttpOnly, hasSameSite := parseCookieAttrs(raw)
+
+		if !hasSameSite {
+			if worstStatus == "pass" {
+				worstStatus = "warn"
+			}
+			details = append(details, name+": SameSite attribute absent")
+			continue
+		}
+
+		valLower := strings.ToLower(sameSiteVal)
+		switch valLower {
+		case "none":
+			if !hasSecure {
+				worstStatus = "fail"
+				details = append(details, name+": SameSite=None without Secure flag (browsers will reject)")
+			} else {
+				detail := name + ": SameSite=None; Secure"
+				if !hasHttpOnly {
+					detail += " (HttpOnly recommended)"
+				} else {
+					detail += "; HttpOnly"
+				}
+				details = append(details, detail)
+			}
+		case "strict":
+			detail := name + ": SameSite=Strict"
+			if hasSecure {
+				detail += "; Secure"
+			}
+			if hasHttpOnly {
+				detail += "; HttpOnly"
+			}
+			details = append(details, detail)
+		case "lax":
+			detail := name + ": SameSite=Lax"
+			if hasSecure {
+				detail += "; Secure"
+			}
+			if hasHttpOnly {
+				detail += "; HttpOnly"
+			}
+			details = append(details, detail)
+		default:
+			if worstStatus == "pass" {
+				worstStatus = "warn"
+			}
+			details = append(details, name+": SameSite="+sameSiteVal+" (unrecognized value)")
 		}
 	}
-	return Result{"headers", "samesite", "pass", "all cookies have SameSite"}
+
+	return Result{"headers", "samesite", worstStatus, strings.Join(details, "; ")}
 }
 
 func checkCORP(resp *http.Response) Result {

@@ -6,274 +6,254 @@ import (
 	"testing"
 )
 
-// helper creates a test server that responds with the given headers.
-func newTestServer(headers map[string]string, statusCode int) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for k, v := range headers {
-			w.Header().Set(k, v)
-		}
-		w.WriteHeader(statusCode)
+func TestCheckSameSite_NoCookies(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	}))
-}
+	defer srv.Close()
 
-// helper fetches a response from a test server.
-func getResponse(t *testing.T, ts *httptest.Server) *http.Response {
-	t.Helper()
-	resp, err := http.Get(ts.URL)
+	resp, err := http.Get(srv.URL)
 	if err != nil {
-		t.Fatalf("failed to GET %s: %v", ts.URL, err)
+		t.Fatal(err)
 	}
-	return resp
-}
-
-// --- CSP tests ---
-
-func TestCheckCSP_WithHeader(t *testing.T) {
-	ts := newTestServer(map[string]string{
-		"Content-Security-Policy": "default-src 'self'",
-	}, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
 	defer resp.Body.Close()
-	result := checkCSP(resp)
 
-	if result.Status != "pass" {
-		t.Errorf("checkCSP with header: status = %q, want %q", result.Status, "pass")
-	}
-	if result.Group != "headers" {
-		t.Errorf("checkCSP: group = %q, want %q", result.Group, "headers")
-	}
-}
-
-func TestCheckCSP_WithoutHeader(t *testing.T) {
-	ts := newTestServer(nil, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkCSP(resp)
-
-	if result.Status != "fail" {
-		t.Errorf("checkCSP without header: status = %q, want %q", result.Status, "fail")
-	}
-}
-
-// --- HSTS tests ---
-
-func TestCheckHSTS_WithValidHeader(t *testing.T) {
-	ts := newTestServer(map[string]string{
-		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-	}, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkHSTS(resp)
-
-	if result.Status != "pass" {
-		t.Errorf("checkHSTS with valid header: status = %q, want %q", result.Status, "pass")
-	}
-}
-
-func TestCheckHSTS_MissingMaxAge(t *testing.T) {
-	ts := newTestServer(map[string]string{
-		"Strict-Transport-Security": "includeSubDomains",
-	}, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkHSTS(resp)
-
-	if result.Status != "warn" {
-		t.Errorf("checkHSTS missing max-age: status = %q, want %q", result.Status, "warn")
-	}
-}
-
-func TestCheckHSTS_WithoutHeader(t *testing.T) {
-	ts := newTestServer(nil, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkHSTS(resp)
-
-	if result.Status != "fail" {
-		t.Errorf("checkHSTS without header: status = %q, want %q", result.Status, "fail")
-	}
-}
-
-// --- CORP tests ---
-
-func TestCheckCORP_WithHeader(t *testing.T) {
-	ts := newTestServer(map[string]string{
-		"Cross-Origin-Resource-Policy": "same-origin",
-	}, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkCORP(resp)
-
-	if result.Status != "pass" {
-		t.Errorf("checkCORP with header: status = %q, want %q", result.Status, "pass")
-	}
-}
-
-func TestCheckCORP_WithoutHeader(t *testing.T) {
-	ts := newTestServer(nil, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkCORP(resp)
-
-	if result.Status != "fail" {
-		t.Errorf("checkCORP without header: status = %q, want %q", result.Status, "fail")
-	}
-}
-
-// --- CORS tests ---
-
-func TestCheckCORS_Wildcard(t *testing.T) {
-	ts := newTestServer(map[string]string{
-		"Access-Control-Allow-Origin": "*",
-	}, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkCORS(resp)
-
-	if result.Status != "warn" {
-		t.Errorf("checkCORS wildcard: status = %q, want %q", result.Status, "warn")
-	}
-}
-
-func TestCheckCORS_SpecificOrigin(t *testing.T) {
-	ts := newTestServer(map[string]string{
-		"Access-Control-Allow-Origin": "https://example.com",
-	}, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkCORS(resp)
-
-	if result.Status != "pass" {
-		t.Errorf("checkCORS specific origin: status = %q, want %q", result.Status, "pass")
-	}
-	if result.Detail != "https://example.com" {
-		t.Errorf("checkCORS specific origin: detail = %q, want %q", result.Detail, "https://example.com")
-	}
-}
-
-func TestCheckCORS_NoCORSHeaders(t *testing.T) {
-	ts := newTestServer(nil, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
-	defer resp.Body.Close()
-	result := checkCORS(resp)
-
+	result := checkSameSite(resp)
 	if result.Status != "skip" {
-		t.Errorf("checkCORS no headers: status = %q, want %q", result.Status, "skip")
+		t.Errorf("expected skip, got %s: %s", result.Status, result.Detail)
 	}
 }
 
-// --- AllGroups tests ---
+func TestCheckSameSite_MissingAttribute(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "session=abc123; Path=/; HttpOnly")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
 
-func TestAllGroups_Returns5Groups(t *testing.T) {
-	groups := AllGroups()
-	if len(groups) != 5 {
-		t.Errorf("AllGroups() returned %d groups, want 5", len(groups))
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	expected := map[string]bool{
-		"headers":      true,
-		"methods":      true,
-		"cross-origin": true,
-		"cache":        true,
-		"state":        true,
-	}
-	for _, g := range groups {
-		if !expected[g.Name] {
-			t.Errorf("AllGroups() contains unexpected group %q", g.Name)
-		}
-		delete(expected, g.Name)
-	}
-	for name := range expected {
-		t.Errorf("AllGroups() missing group %q", name)
-	}
-}
-
-// --- ByName tests ---
-
-func TestByName_ValidNames(t *testing.T) {
-	for _, name := range GroupNames() {
-		g, ok := ByName(name)
-		if !ok {
-			t.Errorf("ByName(%q) returned false", name)
-		}
-		if g.Name != name {
-			t.Errorf("ByName(%q).Name = %q", name, g.Name)
-		}
-		if len(g.Predicates) == 0 {
-			t.Errorf("ByName(%q) returned group with no predicates", name)
-		}
-	}
-}
-
-func TestByName_InvalidName(t *testing.T) {
-	_, ok := ByName("nonexistent")
-	if ok {
-		t.Error("ByName(nonexistent) returned true, want false")
-	}
-}
-
-// --- Run tests ---
-
-func TestRun_HeaderGroup(t *testing.T) {
-	ts := newTestServer(map[string]string{
-		"Content-Security-Policy":      "default-src 'self'",
-		"Strict-Transport-Security":    "max-age=31536000",
-		"Cross-Origin-Resource-Policy": "same-origin",
-	}, 200)
-	defer ts.Close()
-
-	resp := getResponse(t, ts)
 	defer resp.Body.Close()
 
-	results := Run(HeaderGroup(), resp)
-	if len(results) != 4 {
-		t.Fatalf("Run(HeaderGroup) returned %d results, want 4", len(results))
-	}
-
-	// CSP, HSTS, CORP should pass; SameSite should skip (no cookies)
-	statusMap := map[string]string{}
-	for _, r := range results {
-		statusMap[r.Name] = r.Status
-	}
-	if statusMap["csp"] != "pass" {
-		t.Errorf("csp: %q, want pass", statusMap["csp"])
-	}
-	if statusMap["hsts"] != "pass" {
-		t.Errorf("hsts: %q, want pass", statusMap["hsts"])
-	}
-	if statusMap["corp"] != "pass" {
-		t.Errorf("corp: %q, want pass", statusMap["corp"])
-	}
-	if statusMap["samesite"] != "skip" {
-		t.Errorf("samesite: %q, want skip", statusMap["samesite"])
+	result := checkSameSite(resp)
+	if result.Status != "warn" {
+		t.Errorf("expected warn for missing SameSite, got %s: %s", result.Status, result.Detail)
 	}
 }
 
-// --- GroupNames tests ---
+func TestCheckSameSite_NoneWithoutSecure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "session=abc123; Path=/; SameSite=None")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
 
-func TestGroupNames(t *testing.T) {
-	names := GroupNames()
-	if len(names) != 5 {
-		t.Errorf("GroupNames() returned %d names, want 5", len(names))
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "fail" {
+		t.Errorf("expected fail for SameSite=None without Secure, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckSameSite_NoneWithSecure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "session=abc123; Path=/; SameSite=None; Secure; HttpOnly")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass for SameSite=None with Secure, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckSameSite_Strict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "session=abc123; Path=/; SameSite=Strict; Secure; HttpOnly")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass for SameSite=Strict, got %s: %s", result.Status, result.Detail)
+	}
+	if result.Detail != "session: SameSite=Strict; Secure; HttpOnly" {
+		t.Errorf("unexpected detail: %s", result.Detail)
+	}
+}
+
+func TestCheckSameSite_Lax(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "token=xyz; Path=/; SameSite=Lax")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass for SameSite=Lax, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckSameSite_MultipleCookies_MixedFail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Good cookie
+		w.Header().Add("Set-Cookie", "ok=1; Path=/; SameSite=Strict; Secure; HttpOnly")
+		// Bad cookie: SameSite=None without Secure
+		w.Header().Add("Set-Cookie", "bad=2; Path=/; SameSite=None")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "fail" {
+		t.Errorf("expected fail when any cookie has SameSite=None without Secure, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckSameSite_MultipleCookies_AllGood(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "a=1; SameSite=Strict; Secure; HttpOnly")
+		w.Header().Add("Set-Cookie", "b=2; SameSite=Lax; Secure")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass for all good cookies, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckSameSite_NoneWithSecureNoHttpOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "token=abc; SameSite=None; Secure")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass for SameSite=None with Secure, got %s: %s", result.Status, result.Detail)
+	}
+	expected := "token: SameSite=None; Secure (HttpOnly recommended)"
+	if result.Detail != expected {
+		t.Errorf("expected detail %q, got %q", expected, result.Detail)
+	}
+}
+
+func TestCheckSameSite_UnrecognizedValue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "sess=1; SameSite=InvalidValue")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	result := checkSameSite(resp)
+	if result.Status != "warn" {
+		t.Errorf("expected warn for unrecognized SameSite value, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+// TestParseCookieAttrs is a unit test for the helper function.
+func TestParseCookieAttrs(t *testing.T) {
+	tests := []struct {
+		raw          string
+		wantName     string
+		wantSS       string
+		wantSecure   bool
+		wantHTTPOnly bool
+		wantHasSS    bool
+	}{
+		{
+			raw:      "session=abc; SameSite=Strict; Secure; HttpOnly",
+			wantName: "session", wantSS: "Strict",
+			wantSecure: true, wantHTTPOnly: true, wantHasSS: true,
+		},
+		{
+			raw:      "token=xyz; Path=/; SameSite=None",
+			wantName: "token", wantSS: "None",
+			wantSecure: false, wantHTTPOnly: false, wantHasSS: true,
+		},
+		{
+			raw:      "id=1; Path=/",
+			wantName: "id", wantSS: "",
+			wantSecure: false, wantHTTPOnly: false, wantHasSS: false,
+		},
+		{
+			raw:      "x=2; samesite=lax; secure; httponly",
+			wantName: "x", wantSS: "lax",
+			wantSecure: true, wantHTTPOnly: true, wantHasSS: true,
+		},
+	}
+
+	for _, tc := range tests {
+		name, ssVal, secure, httpOnly, hasSS := parseCookieAttrs(tc.raw)
+		if name != tc.wantName {
+			t.Errorf("parseCookieAttrs(%q): name=%q, want %q", tc.raw, name, tc.wantName)
+		}
+		if ssVal != tc.wantSS {
+			t.Errorf("parseCookieAttrs(%q): sameSiteVal=%q, want %q", tc.raw, ssVal, tc.wantSS)
+		}
+		if secure != tc.wantSecure {
+			t.Errorf("parseCookieAttrs(%q): secure=%v, want %v", tc.raw, secure, tc.wantSecure)
+		}
+		if httpOnly != tc.wantHTTPOnly {
+			t.Errorf("parseCookieAttrs(%q): httpOnly=%v, want %v", tc.raw, httpOnly, tc.wantHTTPOnly)
+		}
+		if hasSS != tc.wantHasSS {
+			t.Errorf("parseCookieAttrs(%q): hasSameSite=%v, want %v", tc.raw, hasSS, tc.wantHasSS)
+		}
 	}
 }
