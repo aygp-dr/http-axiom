@@ -1,39 +1,61 @@
 flowchart LR
-    subgraph gen["Generator"]
+    subgraph gen["Request Generator"]
         direction TB
-        G["<b>Request Generator</b><br/><i>method × path × headers<br/>auth × origin × repeat</i>"]
-        M["<b>Mutation Vocabulary</b><br/><i>method-rotate<br/>header-omit · header-corrupt · header-forge<br/>origin-cross-site · origin-same-site<br/>repeat-N · repeat-concurrent</i>"]
-        G -->|"draws variants"| M
+        G["<b>Axis Sampling</b><br/><i>method × path × headers<br/>auth × origin × repeat</i>"]
     end
 
-    subgraph pred["Predicate Groups · 5 groups · 18 predicates"]
+    subgraph mut["Mutation Vocabulary"]
         direction TB
-        P1["<b>Header Predicates</b><br/><i>CSP · HSTS · SameSite · CORP</i>"]
-        P2["<b>Method Semantics</b><br/><i>idempotency · safety · retries</i>"]
+        M1["header-omit<br/>header-corrupt<br/>header-forge"]
+        M2["method-rotate"]
+        M3["origin-cross-site<br/>origin-same-site"]
+        M4["repeat-N"]
+        M5["repeat-concurrent"]
+    end
+
+    subgraph rel["Relevance Matrix"]
+        R["<b>mutation → group routing</b><br/><i>constrains method, auth, repeat<br/>per mutation × predicate pair</i>"]
+    end
+
+    subgraph pred["Predicate Groups · 18 checks"]
+        direction TB
+        P1["<b>Headers</b><br/><i>CSP · HSTS · SameSite · CORP</i>"]
+        P2["<b>Methods</b><br/><i>idempotency · safety · retries</i>"]
         P3["<b>Cross-Origin</b><br/><i>CSRF · CORS · JSONP · redirect</i>"]
-        P4["<b>Cache Correctness</b><br/><i>ETag · no-store · Vary · 304</i>"]
-        P5["<b>State Sequence</b><br/><i>workflow-skip · TOCTOU · replay</i>"]
+        P4["<b>Cache</b><br/><i>ETag · no-store · Vary · 304</i>"]
+        P5["<b>State</b><br/><i>workflow-skip · TOCTOU · replay</i>"]
     end
 
     subgraph orc["Verdict"]
         O["<b>Oracle</b><br/><i>pass / fail + shrink</i>"]
     end
 
-    M -->|"mutated requests"| P1
-    M -->|"mutated requests"| P2
-    M -->|"mutated requests"| P3
-    M -->|"mutated requests"| P4
-    M -->|"mutated requests"| P5
+    G --> M1 & M2 & M3 & M4 & M5
 
-    P1 -->|"results"| O
-    P2 -->|"results"| O
-    P3 -->|"results"| O
-    P4 -->|"results"| O
-    P5 -->|"results"| O
+    M1 -->|"omit · corrupt · forge"| R
+    M2 -->|"verb swap"| R
+    M3 -->|"origin swap"| R
+    M4 -->|"sequential replay"| R
+    M5 -->|"concurrent replay"| R
+
+    R -->|"header-*"| P1
+    R -->|"method-rotate · repeat-N"| P2
+    R -->|"origin-* · header-forge · method-rotate"| P3
+    R -->|"repeat-N"| P4
+    R -->|"repeat-N · repeat-concurrent"| P5
+
+    P1 & P2 & P3 & P4 & P5 --> O
 
     style gen fill:#eeedfe,stroke:#534ab7,color:#3c3489
     style G fill:#eeedfe,stroke:#534ab7,color:#3c3489
-    style M fill:#eeedfe,stroke:#534ab7,color:#3c3489
+    style mut fill:#eeedfe,stroke:#534ab7,color:#3c3489
+    style M1 fill:#eeedfe,stroke:#534ab7,color:#3c3489
+    style M2 fill:#eeedfe,stroke:#534ab7,color:#3c3489
+    style M3 fill:#eeedfe,stroke:#534ab7,color:#3c3489
+    style M4 fill:#eeedfe,stroke:#534ab7,color:#3c3489
+    style M5 fill:#eeedfe,stroke:#534ab7,color:#3c3489
+    style rel fill:#fef3e2,stroke:#b87a2a,color:#7a4f0f
+    style R fill:#fef3e2,stroke:#b87a2a,color:#7a4f0f
     style pred fill:#e1f5ee,stroke:#0f6e56,color:#085041
     style P1 fill:#e1f5ee,stroke:#0f6e56,color:#085041
     style P2 fill:#e1f5ee,stroke:#0f6e56,color:#085041
