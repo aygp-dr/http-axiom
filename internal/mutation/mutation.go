@@ -42,8 +42,17 @@ func AllOperators() []string {
 // Mutator is a function that transforms a request.
 type Mutator func(generator.Request) generator.Request
 
-// MethodRotateMutator cycles the method to the next in the standard list.
-func MethodRotateMutator(r generator.Request) generator.Request {
+// copyHeaders returns a shallow copy of the headers map.
+func copyHeaders(h map[string]string) map[string]string {
+	cp := make(map[string]string, len(h))
+	for k, v := range h {
+		cp[k] = v
+	}
+	return cp
+}
+
+// methodRotateMutator cycles the method to the next in the standard list.
+func methodRotateMutator(r generator.Request) generator.Request {
 	methods := []string{
 		http.MethodGet, http.MethodPost, http.MethodPut,
 		http.MethodDelete, http.MethodPatch, http.MethodHead,
@@ -59,55 +68,60 @@ func MethodRotateMutator(r generator.Request) generator.Request {
 	return r
 }
 
-// HeaderOmitMutator removes all custom headers from the request.
-func HeaderOmitMutator(r generator.Request) generator.Request {
+// headerOmitMutator removes all custom headers from the request.
+func headerOmitMutator(r generator.Request) generator.Request {
+	// Deep copy before clearing — the caller's map must not be affected.
 	r.Headers = make(map[string]string)
 	return r
 }
 
-// HeaderCorruptMutator corrupts header values with invalid bytes.
-func HeaderCorruptMutator(r generator.Request) generator.Request {
+// headerCorruptMutator corrupts header values with invalid bytes.
+func headerCorruptMutator(r generator.Request) generator.Request {
+	r.Headers = copyHeaders(r.Headers)
 	for k := range r.Headers {
 		r.Headers[k] = "\x00\xff" + r.Headers[k]
 	}
 	return r
 }
 
-// HeaderForgeMutator injects common forged headers.
-func HeaderForgeMutator(r generator.Request) generator.Request {
+// headerForgeMutator injects common forged headers.
+func headerForgeMutator(r generator.Request) generator.Request {
+	r.Headers = copyHeaders(r.Headers)
 	r.Headers["X-Forwarded-For"] = "127.0.0.1"
 	r.Headers["X-Real-IP"] = "127.0.0.1"
 	r.Headers["X-Original-URL"] = "/admin"
 	return r
 }
 
-// OriginCrossSiteMutator sets a cross-origin Origin header.
-func OriginCrossSiteMutator(r generator.Request) generator.Request {
+// originCrossSiteMutator sets a cross-origin Origin header.
+func originCrossSiteMutator(r generator.Request) generator.Request {
+	r.Headers = copyHeaders(r.Headers)
 	r.Origin = "cross-site"
 	r.Headers["Origin"] = "https://evil.example.com"
 	return r
 }
 
-// OriginSameSiteMutator sets a same-site Origin header.
-func OriginSameSiteMutator(r generator.Request) generator.Request {
+// originSameSiteMutator sets a same-site Origin header.
+func originSameSiteMutator(r generator.Request) generator.Request {
 	r.Origin = "same-site"
 	return r
 }
 
-// RepeatNMutator sets the request to be replayed N times.
-func RepeatNMutator(r generator.Request) generator.Request {
+// repeatNMutator sets the request to be replayed N times.
+func repeatNMutator(r generator.Request) generator.Request {
 	if r.Repeat < 2 {
 		r.Repeat = 3
 	}
 	return r
 }
 
-// RepeatConcurrentMutator sets the request to be replayed concurrently.
-func RepeatConcurrentMutator(r generator.Request) generator.Request {
+// repeatConcurrentMutator sets the request to be replayed concurrently.
+func repeatConcurrentMutator(r generator.Request) generator.Request {
 	if r.Repeat < 2 {
 		r.Repeat = 5
 	}
 	// Mark as concurrent via header marker.
+	r.Headers = copyHeaders(r.Headers)
 	if r.Headers == nil {
 		r.Headers = make(map[string]string)
 	}
@@ -119,21 +133,21 @@ func RepeatConcurrentMutator(r generator.Request) generator.Request {
 func Get(name string) (Mutator, bool) {
 	switch name {
 	case MethodRotate:
-		return MethodRotateMutator, true
+		return methodRotateMutator, true
 	case HeaderOmit:
-		return HeaderOmitMutator, true
+		return headerOmitMutator, true
 	case HeaderCorrupt:
-		return HeaderCorruptMutator, true
+		return headerCorruptMutator, true
 	case HeaderForge:
-		return HeaderForgeMutator, true
+		return headerForgeMutator, true
 	case OriginCrossSite:
-		return OriginCrossSiteMutator, true
+		return originCrossSiteMutator, true
 	case OriginSameSite:
-		return OriginSameSiteMutator, true
+		return originSameSiteMutator, true
 	case RepeatN:
-		return RepeatNMutator, true
+		return repeatNMutator, true
 	case RepeatConcurrent:
-		return RepeatConcurrentMutator, true
+		return repeatConcurrentMutator, true
 	default:
 		return nil, false
 	}
