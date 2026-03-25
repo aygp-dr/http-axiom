@@ -2,6 +2,12 @@
 #+AUTHOR: aygp-dr
 #+OPTIONS: toc:2 num:nil
 
+[[https://img.shields.io/badge/status-experimental-orange.svg]]
+[[https://img.shields.io/badge/go-1.23+-00ADD8.svg?logo=go]]
+[[https://img.shields.io/badge/property--based%20testing-RFC%20grounded-blueviolet.svg]]
+[[https://img.shields.io/badge/deps-zero-brightgreen.svg]]
+[[https://img.shields.io/badge/license-MIT-blue.svg]]
+
 * Overview
 
 ~hax~ generates HTTP request variants, applies structured mutations,
@@ -14,6 +20,8 @@ treats HTTP compliance as a property-testing problem:
 #+begin_example
 Request Generator → Mutation Vocabulary → Predicate Groups → Oracle
 #+end_example
+
+[[file:model-architecture.svg]]
 
 * Quick Start
 
@@ -140,6 +148,27 @@ internal/
 - *JSON output* — ~--json~ flag on all commands for pipeline integration.
 - *Property-based* — not signature scanning, not random fuzzing.
 
+* Test Targets
+
+Two deliberately vulnerable targets for development and demos:
+
+#+begin_src bash
+# Built-in lightweight Go server (15 endpoints, all predicate groups)
+make haxgoat          # starts on :9999
+./hax audit http://localhost:9999
+./hax audit http://localhost:9999/secure
+
+# OWASP Juice Shop via Docker (real REST API + OpenAPI spec)
+make juice-shop       # starts on :3000
+./hax audit http://localhost:3000
+
+# Auto-detect and audit whichever is running
+make smoke
+#+end_src
+
+See ~cmd/haxgoat/main.go~ for the full endpoint manifest, or
+query ~/manifest~ at runtime.
+
 * Development
 
 #+begin_src bash
@@ -147,6 +176,7 @@ make build       # Build with version info
 make test        # Run tests
 make test-race   # With race detector
 make lint        # Vet + gofmt + golangci-lint
+make smoke       # Audit against haxgoat or Juice Shop
 make help        # All targets
 #+end_src
 
