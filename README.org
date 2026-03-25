@@ -1,0 +1,155 @@
+#+TITLE: hax — Property-Based HTTP Axiom Tester
+#+AUTHOR: aygp-dr
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+~hax~ generates HTTP request variants, applies structured mutations,
+and checks RFC-grounded predicates to find compliance violations in
+web services.
+
+Unlike scanners (nuclei), fuzzers (ffuf), or proxies (burp), ~hax~
+treats HTTP compliance as a property-testing problem:
+
+#+begin_example
+Request Generator → Mutation Vocabulary → Predicate Groups → Oracle
+#+end_example
+
+* Quick Start
+
+#+begin_src bash
+# Build
+make build
+
+# Quick compliance audit
+./hax audit https://example.com
+
+# See what's available
+./hax list groups
+./hax list mutations
+
+# Full property-based test run
+./hax run -t https://example.com
+
+# JSON output for pipelines
+./hax --json audit https://example.com
+#+end_src
+
+* Installation
+
+#+begin_src bash
+# From source
+git clone https://github.com/aygp-dr/http-axiom.git
+cd http-axiom
+make install    # installs to ~/.local/bin/hax
+
+# Cross-compile
+make build-all  # outputs to dist/
+#+end_src
+
+* Architecture
+
+** Request Generator
+
+Produces HTTP request variants from the cartesian product of axes:
+
+| Axis    | Values                                       |
+|---------+----------------------------------------------|
+| Method  | GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS |
+| Path    | User-supplied list                           |
+| Headers | Standard + custom                            |
+| Auth    | none, bearer, basic, cookie                  |
+| Origin  | omitted, same-site, cross-site               |
+| Repeat  | single, N×, concurrent                       |
+
+** Mutation Vocabulary
+
+| Operator           | Effect                              |
+|--------------------+-------------------------------------|
+| method-rotate      | Cycle through HTTP methods          |
+| header-omit        | Remove required headers             |
+| header-corrupt     | Malform header values               |
+| header-forge       | Inject forged headers (XFF, X-Real) |
+| origin-cross-site  | Set cross-origin Origin header      |
+| origin-same-site   | Set same-site Origin header         |
+| repeat-N           | Replay request N times              |
+| repeat-concurrent  | Replay request concurrently         |
+
+** Predicate Groups
+
+Five RFC-grounded predicate groups:
+
+| Group        | Predicates                          |
+|--------------+-------------------------------------|
+| headers      | CSP, HSTS, SameSite, CORP           |
+| methods      | idempotency, safety, retries        |
+| cross-origin | CSRF, CORS, JSONP, redirect         |
+| cache        | ETag, no-store, Vary, 304           |
+| state        | workflow skip, TOCTOU, replay       |
+
+** Oracle
+
+Reports pass/fail verdicts. Uses Hegel-based shrinking to find
+the smallest request that still triggers a failure.
+
+* Commands
+
+| Command             | Description                                |
+|---------------------+--------------------------------------------|
+| ~generate~ (~gen~)  | Generate HTTP request variants             |
+| ~mutate~ (~mut~)    | Apply mutation operators to requests       |
+| ~check~             | Run predicate checks against a target      |
+| ~run~               | Full pipeline: generate → mutate → check   |
+| ~list~ (~ls~)       | List predicates, mutations, groups, methods |
+| ~audit~             | Quick compliance audit of an endpoint      |
+| ~shrink~            | Minimize a failing test case               |
+| ~doctor~            | Run diagnostic health checks               |
+| ~quickstart~        | Onboarding context for agents              |
+| ~version~           | Print version info                         |
+
+* Global Flags
+
+| Flag            | Description          |
+|-----------------+----------------------|
+| ~-t, --target~  | Target URL           |
+| ~-V, --verbose~ | Verbose output       |
+| ~--json~        | JSON output          |
+| ~-v, --version~ | Print version        |
+| ~-h, --help~    | Show help            |
+
+* Project Layout
+
+#+begin_example
+main.go                      CLI entry point (hand-written arg routing)
+go.mod                       Module (zero deps)
+Makefile                     Build, test, lint, install
+CLAUDE.md                    Agent coding context
+AGENTS.md                    Agent development rules
+internal/
+  generator/generator.go     Request variant generation
+  mutation/mutation.go       Mutation operators
+  predicate/predicate.go     RFC-grounded predicate checks
+  oracle/oracle.go           Verdict + shrinking
+#+end_example
+
+* Design Decisions
+
+- *Zero dependencies* — Go stdlib only. No CLI frameworks.
+- *Hand-written flag parsing* — follows [[https://github.com/jwalsh/sb][sb]] / [[https://github.com/jwalsh/cprr][cprr]] pattern.
+- *Single binary* — cross-compiles to linux/darwin (amd64/arm64).
+- *JSON output* — ~--json~ flag on all commands for pipeline integration.
+- *Property-based* — not signature scanning, not random fuzzing.
+
+* Development
+
+#+begin_src bash
+make build       # Build with version info
+make test        # Run tests
+make test-race   # With race detector
+make lint        # Vet + gofmt + golangci-lint
+make help        # All targets
+#+end_src
+
+* License
+
+MIT

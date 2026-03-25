@@ -1,0 +1,463 @@
+#+TITLE: http-axiom (hax): Property-Based HTTP Protocol Testing
+#+DATE: 2026-03-24
+#+STARTUP: overview
+
+* Concept
+
+~http-axiom~ (~hax~) tests HTTP *protocol-level* axioms: properties any server
+must satisfy independent of what its endpoints do. No schema required.
+
+Distinction from Schemathesis: Schemathesis needs OpenAPI and tests endpoint
+logic. ~hax~ tests the protocol contract. Works on any HTTP server.
+
+** Formal model
+
+Every property is a predicate over: ~(RequestVariant, Response) -> bool~
+
+RequestVariant drawn from a mutation vocabulary defined by HTTP RFCs:
+
+| Axis | Draws from | Source |
+|------|-----------|--------|
+| method | GET POST PUT PATCH DELETE HEAD OPTIONS TRACE | RFC 9110 s9 |
+| headers | present / absent / corrupted / forged | per-property |
+| origin | same-site / cross-site / direct / null | Fetch metadata |
+| auth_context | anon / user_a / user_b / admin | caller-provided |
+| repeat | 1..N sequential or concurrent | per-property |
+
+** The Figma blind spot
+
+Figma models a single cooperative actor on the happy path. Every axiom
+below lives in the gap:
+
+  what the UI sends != what the server accepts from anywhere
+
+* Property-RFC reference table
+
+| Axiom | RFC / Spec | Why Figma misses it |
+|-------|-----------|---------------------|
+| CSP | W3C CSP Level 3 | Designers never see non-UI routes |
+| HSTS | RFC 6797 | Protocol layer invisible in design |
+| X-Content-Type-Options | WHATWG MIME | Not a UI concern |
+| SameSite cookies | RFC 6265bis | Cookie attrs not in Figma |
+| CSRF token missing-case | OWASP | Form always sends the token |
+| Fetch metadata | W3C Fetch | No concept of Origin in Figma |
+| JSONP | Legacy / CORS | callback param never in Figma |
+| Open redirect | OWASP WSTG | Designers link to real pages |
+| Idempotency-Key | IETF draft | Double-submit = two click events |
+| PUT idempotency | RFC 9110 s9.2.2 | One submit button in design |
+| GET safety | RFC 9110 s9.2.1 | GET drawn as read-only |
+| Cache-Control: no-store | RFC 9111 s5.2 | CDN invisible to designer |
+| ETag round-trip | RFC 9111 s4.3.2 | 304 never drawn |
+| Vary correctness | RFC 9111 s4.1 | One locale in design |
+| CSRF token replay | OWASP STP | Second submission not drawn |
+| Workflow bypass | OWASP WSTG-SESS | UI enforces order; server must too |
+
+* Group 1: Header axioms
+:PROPERTIES:
+:header-args:python: :tangle src/http_axiom/headers.py :mkdirp t
+:END:
+
+Single-request predicates. No application knowledge required.
+Most commonly absent in AI-generated scaffolding.
+
+#+begin_src python
+import re
+from dataclasses import dataclass, field
+
+
+@dataclass
+class AxiomResult:
+    status: str
+    message: str = ""
+    detail: dict = field(default_factory=dict)
+
+    @classmethod
+    def pass_(cls): return cls("pass")
+    @classmethod
+    def fail(cls, msg, detail=None): return cls("fail", msg, detail or {})
+    @classmethod
+    def warn(cls, msg): return cls("warn", msg)
+    @classmethod
+    def skip(cls, reason): return cls("skip", reason)
+
+
+def check_csp(response) -> AxiomResult:
+    ct = response.headers.get("Content-Type", "")
+    if "text/html" not in ct:
+        return AxiomResult.skip("not HTML")
+    csp = response.headers.get("Content-Security-Policy", "")
+    if not csp:
+        return AxiomResult.fail("missing Content-Security-Policy",
+                                {"path": response.url})
+    if "unsafe-inline" in csp and "nonce-" not in csp and "sha256-" not in csp:
+        return AxiomResult.warn("CSP allows unsafe-inline without nonce/hash")
+    return AxiomResult.pass_()
+
+
+def check_hsts(response) -> AxiomResult:
+    if not response.url.startswith("https://"):
+        return AxiomResult.skip("not HTTPS")
+    hsts = response.headers.get("Strict-Transport-Security", "")
+    if not hsts:
+        return AxiomResult.fail("missing Strict-Transport-Security")
+    m = re.search(r"max-age=(\d+)", hsts)
+    if m and int(m.group(1)) < 31_536_000:
+        return AxiomResult.warn(f"HSTS max-age too short: {m.group(1)}s")
+    return AxiomResult.pass_()
+
+
+def check_x_content_type(response) -> AxiomResult:
+    val = response.headers.get("X-Content-Type-Options", "")
+    if val.lower() != "nosniff":
+        return AxiomResult.fail("X-Content-Type-Options missing/incorrect",
+                                {"got": val})
+    return AxiomResult.pass_()
+
+
+def check_samesite_cookies(response) -> AxiomResult:
+    violations = []
+    for cookie in response.cookies:
+        ss = getattr(cookie, "same_site", "").lower()
+        if ss not in ("strict", "lax"):
+            violations.append(f"{cookie.name}: SameSite={ss or 'missing'}")
+    if violations:
+        return AxiomResult.fail("cookies missing SameSite", {"cookies": violations})
+    return AxiomResult.pass_()
+
+
+def check_referrer_policy(response) -> AxiomResult:
+    rp = response.headers.get("Referrer-Policy", "")
+    SAFE = {"no-referrer", "strict-origin",
+            "strict-origin-when-cross-origin", "no-referrer-when-downgrade"}
+    if not rp:
+        return AxiomResult.fail("missing Referrer-Policy")
+    if rp.lower() not in SAFE:
+        return AxiomResult.warn(f"permissive Referrer-Policy: {rp!r}")
+    return AxiomResult.pass_()
+#+end_src
+
+* Group 2: Method semantics axioms
+:PROPERTIES:
+:header-args:python: :tangle src/http_axiom/methods.py :mkdirp t
+:END:
+
+RFC 9110 safety and idempotency are server obligations, not client recommendations.
+
+#+begin_src python
+import requests as http
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+@given(path=st.sampled_from(["/", "/users", "/products"]))
+@settings(max_examples=50)
+def test_safe_methods_no_state_change(base_url, path):
+    """Safety axiom (RFC 9110 s9.2.1): GET must not change observable state."""
+    before = http.get(f"{base_url}{path}").json()
+    http.get(f"{base_url}{path}", params={"action": "delete", "confirm": "yes"})
+    after = http.get(f"{base_url}{path}").json()
+    assert before == after, f"GET {path} changed server state"
+
+
+@given(
+    path=st.sampled_from(["/users/1", "/settings/theme"]),
+    body=st.fixed_dictionaries({"value": st.text(max_size=20)}),
+)
+@settings(max_examples=30)
+def test_put_idempotent(base_url, path, body, session):
+    """PUT idempotency axiom (RFC 9110 s9.2.2): PUT N times = PUT once."""
+    http.put(f"{base_url}{path}", json=body, cookies=session)
+    http.put(f"{base_url}{path}", json=body, cookies=session)
+    state1 = http.get(f"{base_url}{path}", cookies=session).json()
+    http.put(f"{base_url}{path}", json=body, cookies=session)
+    state2 = http.get(f"{base_url}{path}", cookies=session).json()
+    assert state1 == state2, "PUT not idempotent: state differs after third apply"
+
+
+@given(
+    amount=st.integers(min_value=1, max_value=99999),
+    key=st.uuids(),
+    n=st.integers(min_value=2, max_value=4),
+)
+@settings(max_examples=50)
+def test_idempotency_key(base_url, amount, key, n, session):
+    """
+    Idempotency-Key axiom (IETF draft-ietf-httpapi-idempotency-key-header):
+    POST with same key N times -> same response, exactly one side effect.
+    This is the double-submit payment property.
+    """
+    headers = {"Idempotency-Key": str(key)}
+    payload = {"amount": amount}
+    responses = [
+        http.post(f"{base_url}/payments", json=payload,
+                  headers=headers, cookies=session)
+        for _ in range(n)
+    ]
+    ids = {r.json().get("payment_id") for r in responses
+           if r.status_code in (200, 201)}
+    assert len(ids) == 1, f"Different payment_ids for same key: {ids}"
+    charges = http.get(f"{base_url}/charges",
+                       params={"idempotency_key": str(key)},
+                       cookies=session).json()
+    assert len(charges) == 1, f"Key produced {len(charges)} charges (expected 1)"
+#+end_src
+
+* Group 3: Cross-origin axioms
+:PROPERTIES:
+:header-args:python: :tangle src/http_axiom/cross_origin.py :mkdirp t
+:END:
+
+Requires varying the Origin header. Invisible in Figma.
+
+#+begin_src python
+import requests as http
+from urllib.parse import urlparse
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+TOKEN_SCENARIOS = st.sampled_from([
+    {"present": False, "valid": False},   # missing -- must reject
+    {"present": True,  "valid": False},   # invalid -- must reject
+    {"present": True,  "valid": True},    # valid -- must accept
+])
+
+
+@given(
+    path=st.sampled_from(["/payments", "/transfer", "/settings/email"]),
+    scenario=TOKEN_SCENARIOS,
+)
+@settings(max_examples=60)
+def test_csrf_protection(base_url, path, scenario, session, valid_csrf_token):
+    """
+    CSRF axiom: state-changing requests without a valid token must be rejected.
+    OWASP documents the common bug: reject invalid tokens but accept MISSING ones.
+    PBT generates both.
+    """
+    headers = {}
+    if scenario["present"]:
+        headers["X-CSRF-Token"] = (valid_csrf_token if scenario["valid"]
+                                   else "garbage")
+    r = http.post(f"{base_url}{path}", json={"value": "test"},
+                  headers=headers, cookies=session)
+    if not scenario["present"] or not scenario["valid"]:
+        assert r.status_code in (400, 403), (
+            f"CSRF: {path} accepted "
+            f"{'missing' if not scenario['present'] else 'invalid'} token "
+            f"(got {r.status_code})"
+        )
+
+
+@given(
+    path=st.sampled_from(["/payments", "/settings"]),
+    origin=st.sampled_from(["https://evil.example.com", "null"]),
+)
+@settings(max_examples=40)
+def test_cross_site_post_blocked(base_url, path, origin, session):
+    """Fetch metadata axiom: cross-site POSTs must be rejected."""
+    r = http.post(f"{base_url}{path}", json={"value": "test"},
+                  headers={"Origin": origin, "Sec-Fetch-Site": "cross-site"},
+                  cookies=session)
+    assert r.status_code in (400, 403), \
+        f"Cross-site POST to {path} not blocked (Origin:{origin} got {r.status_code})"
+
+
+@given(
+    path=st.sampled_from(["/api/users", "/api/payments"]),
+    callback=st.text(min_size=1, max_size=20,
+                     alphabet=st.characters(whitelist_categories=("Ll",))),
+)
+@settings(max_examples=50)
+def test_jsonp_not_honored(base_url, path, callback):
+    """JSONP axiom: callback parameter must not be reflected. Legacy cross-origin bypass."""
+    r = http.get(f"{base_url}{path}", params={"callback": callback})
+    ct = r.headers.get("Content-Type", "")
+    assert "javascript" not in ct, \
+        f"JSONP: {path}?callback={callback} returned JavaScript content-type"
+    body = r.text.strip()
+    assert not body.startswith(callback + "("), \
+        f"JSONP: response wrapped in callback: {body[:60]}"
+
+
+REDIRECT_TARGETS = st.one_of(
+    st.just("//evil.com"),
+    st.just("https://evil.com"),
+    st.just("/%2F%2Fevil.com"),
+    st.text(max_size=40).map(lambda s: f"/{s}"),
+)
+
+
+@given(target=REDIRECT_TARGETS)
+@settings(max_examples=80)
+def test_open_redirect(base_url, target, session):
+    """Open redirect axiom: redirect_to must be validated to same-origin paths."""
+    for param in ["next", "redirect_to", "return_url", "goto", "url"]:
+        r = http.get(f"{base_url}/login", params={param: target},
+                     allow_redirects=False, cookies=session)
+        if r.status_code in (301, 302, 303, 307, 308):
+            location = r.headers.get("Location", "")
+            parsed = urlparse(location)
+            assert parsed.netloc in ("", "localhost", "example.com"), \
+                f"Open redirect via ?{param}={target!r} -> {location}"
+            assert not location.startswith("//"), \
+                f"Scheme-relative redirect: {location}"
+#+end_src
+
+* Group 4: Cache control axioms
+:PROPERTIES:
+:header-args:python: :tangle src/http_axiom/cache.py :mkdirp t
+:END:
+
+#+begin_src python
+import requests as http
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+@given(path=st.sampled_from(["/users/me", "/payments", "/orders",
+                              "/settings", "/api/tokens"]))
+@settings(max_examples=40)
+def test_sensitive_not_cacheable(base_url, path, session):
+    """
+    No-store axiom: authenticated responses must include Cache-Control: no-store.
+    Absence means CDN may serve one user data to another.
+    """
+    r = http.get(f"{base_url}{path}", cookies=session)
+    if r.status_code != 200:
+        return
+    cc = r.headers.get("Cache-Control", "")
+    directives = {d.strip().lower() for d in cc.split(",")}
+    assert "no-store" in directives or "private" in directives, (
+        f"Sensitive {path} missing Cache-Control: no-store|private (got: {cc!r})"
+    )
+
+
+@given(path=st.sampled_from(["/products", "/categories", "/static/data"]))
+@settings(max_examples=40)
+def test_etag_roundtrip(base_url, path):
+    """ETag round-trip axiom: correct ETag -> 304; wrong ETag -> 200."""
+    r = http.get(f"{base_url}{path}")
+    etag = r.headers.get("ETag")
+    if not etag:
+        return
+    r304 = http.get(f"{base_url}{path}", headers={"If-None-Match": etag})
+    assert r304.status_code == 304, \
+        f"ETag: If-None-Match:{etag} returned {r304.status_code}"
+    r200 = http.get(f"{base_url}{path}", headers={"If-None-Match": '"wrong"'})
+    assert r200.status_code == 200, \
+        f"Wrong ETag should be 200, got {r200.status_code}"
+
+
+@given(path=st.sampled_from(["/products", "/pages"]))
+@settings(max_examples=30)
+def test_vary_correctness(base_url, path):
+    """Vary axiom (RFC 9111 s4.1): localized content must declare Accept-Language in Vary."""
+    r_en = http.get(f"{base_url}{path}", headers={"Accept-Language": "en-US"})
+    r_fr = http.get(f"{base_url}{path}", headers={"Accept-Language": "fr-FR"})
+    if r_en.text != r_fr.text:
+        vary = r_en.headers.get("Vary", "")
+        assert "Accept-Language" in vary, (
+            f"{path} varies by language but Vary lacks Accept-Language (got: {vary!r})"
+        )
+#+end_src
+
+* Group 5: State sequence axioms
+:PROPERTIES:
+:header-args:python: :tangle src/http_axiom/state.py :mkdirp t
+:END:
+
+#+begin_src python
+import requests as http
+from hypothesis.stateful import RuleBasedStateMachine, rule, invariant
+
+
+class WorkflowBypassMachine(RuleBasedStateMachine):
+    """
+    Workflow bypass axiom: server must enforce step order independently
+    of the UI. Figma draws client-side enforcement; this tests server-side.
+    """
+    def __init__(self):
+        super().__init__()
+        self.base = "http://localhost:8000"
+        self.s = http.Session()
+        self.cart_id = None
+
+    @rule()
+    def add_to_cart(self):
+        r = self.s.post(f"{self.base}/cart", json={"sku": "PROD-1", "qty": 1})
+        if r.status_code == 200:
+            self.cart_id = r.json().get("cart_id")
+
+    @rule()
+    def skip_to_confirm(self):
+        r = self.s.post(f"{self.base}/checkout/confirm",
+                        json={"card": "4111111111111111"})
+        assert r.status_code in (400, 403, 409, 422), (
+            f"Workflow bypass: /checkout/confirm accepted without payment intent "
+            f"(got {r.status_code})"
+        )
+
+
+class CSRFReplayMachine(RuleBasedStateMachine):
+    """
+    CSRF replay axiom (Synchronizer Token Pattern): consumed tokens must
+    not be re-usable. Tests per-request token rotation.
+    """
+    def __init__(self):
+        super().__init__()
+        self.base = "http://localhost:8000"
+        self.s = http.Session()
+        self.used_tokens = []
+
+    @rule()
+    def use_token(self):
+        r = self.s.get(f"{self.base}/form")
+        token = (r.cookies.get("csrf_token") or
+                 r.headers.get("X-CSRF-Token"))
+        if not token:
+            return
+        r2 = self.s.post(f"{self.base}/settings/email",
+                         json={"email": "t@example.com"},
+                         headers={"X-CSRF-Token": token})
+        if r2.status_code in (200, 201):
+            self.used_tokens.append(token)
+
+    @invariant()
+    def used_tokens_rejected(self):
+        for token in self.used_tokens:
+            r = self.s.post(f"{self.base}/settings/email",
+                            json={"email": "replay@example.com"},
+                            headers={"X-CSRF-Token": token})
+            assert r.status_code in (400, 403), (
+                f"CSRF replay: consumed token accepted again (got {r.status_code})"
+            )
+
+
+WorkflowBypassTest = WorkflowBypassMachine.TestCase
+CSRFReplayTest     = CSRFReplayMachine.TestCase
+#+end_src
+
+* Stack position
+
+#+begin_example
+L0  Figma / design review        happy path, one actor, correct inputs
+L1  http-axiom (hax)             protocol axioms, no schema, RFC-grounded
+L2  Schemathesis                 endpoint logic, requires OpenAPI schema
+L3  Application PBT (hegel)      business rules, domain generators
+L4  Stateful / model-based PBT   multi-step workflows, invariants
+L5  Antithesis / Bombadil        concurrent, distributed, non-deterministic
+#+end_example
+
+http-axiom is L1: the axioms that hold before any application logic runs.
+Every layer above assumes L1 is satisfied.
+
+* CPRR
+
+| ID | Conjecture | Status |
+|----|-----------|--------|
+| H1 | Header predicates need no application knowledge | CONFIRMED |
+| H2 | CSRF missing-token case is the common implementation bug | CONFIRMED (OWASP) |
+| H3 | JSONP survives in API-first codebases | OPEN |
+| H4 | ETag failures are common in generated code | OPEN |
+| H5 | Workflow bypass needs app-specific step fixtures | CONFIRMED |
+| H6 | Idempotency-Key IETF draft adoption by frameworks | OPEN |

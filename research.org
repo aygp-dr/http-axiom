@@ -1,0 +1,401 @@
+#+TITLE: http-axiom: Related Work and Threat Context
+#+AUTHOR: jw
+#+DATE: 2026-03-25
+#+STARTUP: overview
+
+This document surveys the tools that inhabit the HTTP protocol testing
+space, the empirical evidence that this class of testing is systematically
+missed, and why the problem is structurally worse for agentically developed
+code than for human-written code.
+
+* The short version
+
+Zero out of fifteen applications built by five major AI coding tools had
+CSRF protection. Zero set any security headers. This is not an edge case:
+it is the baseline. ~http-axiom~ exists to make these properties testable
+at the protocol level before any application logic runs.
+
+* The empirical case
+
+** Tenzai study (December 2025)
+
+Five tools — Claude Code, OpenAI Codex, Cursor, Replit, Devin — each built
+three identical web applications from pre-defined prompts. 69 vulnerabilities
+across 15 applications.
+
+- CSRF protection: 0 of 15 apps implemented it (2 attempted, both failed)
+- Security headers: 0 of 15 set CSP, X-Frame-Options, HSTS, X-Content-Type-Options, or correct CORS
+- Rate limiting: 1 of 15 attempted — bypassable via ~X-Forwarded-For~
+- SSRF: present in every application, every tool
+
+Researcher Ori David's conclusion: "Coding agents cannot be trusted to design
+secure applications. They seem to be very prone to business logic
+vulnerabilities."
+
+Adding explicit security prompts produced "minimal vulnerability reduction."
+
+Source: reported at https://awesomeagents.ai/news/vibe-coding-security-69-vulnerabilities/
+
+** Veracode 2025 GenAI Code Security Report
+
+100+ LLMs tested across 80 coding tasks, four languages.
+
+- 45% of code samples introduced OWASP Top 10 vulnerabilities
+- Java failure rate: >70%
+- XSS (CWE-80) failure rate: 86%
+- Log injection (CWE-117) failure rate: 88%
+
+CTO Jens Wessling: "Our research shows models are getting better at coding
+accurately but are not improving at security [...] this is a systemic issue
+rather than an LLM scaling problem."
+
+Source: https://www.veracode.com/blog/genai-code-security-report/
+
+** Apiiro Fortune 50 enterprise analysis (2025)
+
+Compared AI-generated versus human-written code across Fortune 50 repositories.
+
+- CVSS 7.0+ vulnerabilities: 2.5x more frequent in AI-generated code
+- Privilege escalation paths: 322% more
+- Design flaws: 153% more
+- Secrets exposure: 40% more
+
+By June 2025, AI-generated code was adding 10,000+ new security findings
+per month across tracked repositories — a 10x increase from December 2024.
+
+Source: https://www.softwareseni.com/ai-generated-code-security-risks-why-vulnerabilities-increase-2-74x-and-how-to-prevent-them/
+
+** Escape.tech vibe-coded application scan (2025)
+
+Scanned 5,600 publicly deployed applications built on Lovable, Base44,
+Create.xyz, Vibe Studio, and Bolt.new.
+
+- 2,000+ vulnerabilities found
+- 400+ exposed secrets (API keys, credentials, tokens in accessible code)
+- 175 instances of PII exposed through app endpoints
+
+Source: referenced at https://www.getautonoma.com/blog/vibe-coding-security-risks
+
+** Why this is structurally worse for agentic code
+
+Human developers bring intuitive understanding of threat models that they
+accumulate across projects and incidents. This shows up as "don't forget the
+CSRF token" being a reflex, not a lookup.
+
+AI coding agents trained on public code inherit the security posture of the
+public code corpus — which systematically underrepresents security headers,
+idempotency constraints, and cache directives because these are configuration
+concerns that rarely appear in the code examples that dominate training data.
+The agent produces functionally correct code; the protocol contract is
+invisible to it.
+
+The problem compounds with agentic workflows specifically because:
+
+1. Velocity defeats review cadence — code ships faster than human security
+   review can keep pace
+2. Homogeneity — all agents trained on the same corpus make the same
+   omissions systematically across every project they touch
+3. No accumulation — unlike a human who learns from a past CSRF incident,
+   each agent session starts fresh
+4. Happy-path optimisation — agents optimise for the feedback signal of
+   "it works," which is satisfied by a functionally correct response with
+   no security headers
+
+* The tool landscape
+
+** L1: Protocol axiom testing (the gap http-axiom fills)
+
+No widely-adopted open-source tool occupied this space before. The closest
+prior work is ad hoc header checklists and OWASP ZAP's passive scan mode.
+
+| Tool | URL | Notes |
+|------|-----|-------|
+| OWASP ZAP | https://github.com/zaproxy/zaproxy | Active/passive scanner, not PBT |
+| securityheaders.com | https://securityheaders.com | Manual single-URL check |
+| mozilla/http-observatory | https://github.com/mozilla/http-observatory | Batch header scoring, not PBT |
+
+** L2: Schema-based API property testing
+
+*** Schemathesis
+- Repo: https://github.com/schemathesis/schemathesis
+- Docs: https://schemathesis.readthedocs.io
+- Built on Hypothesis. Requires OpenAPI or GraphQL schema.
+- Detects 1.4x-4.5x more defects than other API fuzzing tools (academic eval).
+- Stateful testing via OpenAPI links or ~as_state_machine()~.
+- The reference L2 tool. Does not test protocol-level properties.
+
+*** RESTler (Microsoft Research)
+- Repo: https://github.com/microsoft/restler-fuzzer
+- Stateful REST API fuzzer for automated black-box testing.
+- Infers producer-consumer dependencies from OpenAPI spec.
+- Finds violations through automatically generated test sequences.
+
+*** Dredd
+- Repo: https://github.com/apiaryio/dredd
+- HTTP API testing tool that validates API against its blueprint.
+- Blueprint-driven, not PBT. Useful for contract enforcement.
+
+** L3: Application-level PBT
+
+*** Hypothesis (Python)
+- Repo: https://github.com/HypothesisWorks/hypothesis
+- Docs: https://hypothesis.readthedocs.io
+- The foundation for Schemathesis and hegel.
+- ~RuleBasedStateMachine~ for stateful HTTP sequences.
+- ~@given~ + ~requests~ for custom endpoint properties.
+
+*** Hegel
+- Site: https://hegel.dev
+- Repo (core): https://github.com/hegeldev/hegel-core
+- Repo (Rust): https://github.com/hegeldev/hegel-rust
+- Universal PBT protocol built on Hypothesis. Released March 2026.
+- Client-server architecture (CBOR over Unix socket).
+- Language-agnostic; Go, C++, OCaml, TypeScript in progress.
+- Announced: https://antithesis.com/blog/2026/hegel/
+
+*** QuickCheck (Haskell, original)
+- Repo: https://github.com/nick8325/quickcheck
+- The origin of PBT. All other libraries derive from this.
+
+*** fast-check (TypeScript/JavaScript)
+- Repo: https://github.com/dubzzz/fast-check
+- Hypothesis-quality PBT for the JS ecosystem.
+- Stateful model testing via ~ModelRun~.
+
+*** proptest (Rust)
+- Repo: https://github.com/proptest-rs/proptest
+- Regression-persistent PBT for Rust.
+
+** L5: Distributed / concurrent testing
+
+*** Antithesis
+- Site: https://antithesis.com
+- Deterministic simulation testing for distributed systems.
+- Finds race conditions and TOCTOU bugs invisible to sequential PBT.
+- Blog: https://antithesis.com/blog/2026/hegel/ (Hegel integration roadmap)
+
+*** Bombadil (Antithesis, open source)
+- Repo: https://github.com/antithesishq/bombadil
+- Property-based testing for concurrent/distributed systems.
+- Hegel protocol integration on roadmap.
+
+** Security scanning (SAST/DAST, not PBT)
+
+These scan for known patterns; they do not generate inputs or test
+protocol-level properties. Listed for completeness.
+
+| Tool | URL | Notes |
+|------|-----|-------|
+| OWASP ZAP | https://github.com/zaproxy/zaproxy | DAST, passive+active |
+| Burp Suite | https://portswigger.net/burp | Manual+automated DAST |
+| StackHawk | https://www.stackhawk.com | DAST with BOLA/IDOR detection |
+| Snyk | https://snyk.io | SAST+SCA |
+| Semgrep | https://github.com/semgrep/semgrep | SAST, rule-based |
+
+** Relevant standards and references
+
+| Resource | URL | Relevance |
+|----------|-----|-----------|
+| OWASP Top 10 2025 | https://owasp.org/www-project-top-ten/ | Broken Access Control #1 |
+| OWASP API Security Top 10 | https://owasp.org/API-Security/ | BOLA #1 API risk |
+| OWASP Top 10 for Agentic Applications 2026 | https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/ | First agentic-specific taxonomy |
+| OWASP CSRF Prevention Cheat Sheet | https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html | Canonical CSRF reference |
+| OWASP Web Security Testing Guide | https://owasp.org/www-project-web-security-testing-guide/ | Test methodology reference |
+| RFC 9110 (HTTP Semantics) | https://www.rfc-editor.org/rfc/rfc9110 | Safety, idempotency definitions |
+| RFC 9111 (HTTP Caching) | https://www.rfc-editor.org/rfc/rfc9111 | Cache-Control, ETag, Vary |
+| RFC 6797 (HSTS) | https://www.rfc-editor.org/rfc/rfc6797 | Strict-Transport-Security |
+| W3C CSP Level 3 | https://www.w3.org/TR/CSP3/ | Content-Security-Policy |
+| W3C Fetch metadata | https://www.w3.org/TR/fetch-metadata/ | Sec-Fetch-* headers |
+| IETF Idempotency-Key draft | https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/ | Idempotency-Key header spec |
+
+* OWASP Top 10 (2021) predicate mapping
+
+This table maps each OWASP Top 10 item to hax predicate groups and
+mutation operators, identifying coverage and gaps.
+
+| # | OWASP Top 10 (2021)                 | hax Group(s)            | hax Predicates / Mutations            | Coverage |
+|---+-------------------------------------+-------------------------+---------------------------------------+----------|
+| 1 | A01: Broken Access Control          | cross-origin, state     | csrf, cors, redirect, workflow-skip   | Partial  |
+| 2 | A02: Cryptographic Failures         | headers                 | hsts                                  | Minimal  |
+| 3 | A03: Injection                      | (mutation-driven)       | header-corrupt, header-forge          | Indirect |
+| 4 | A04: Insecure Design                | methods, state          | idempotency, safety, toctou           | Partial  |
+| 5 | A05: Security Misconfiguration      | headers, cache          | csp, corp, no-store, vary, samesite   | Strong   |
+| 6 | A06: Vulnerable Components          | —                       | —                                     | None     |
+| 7 | A07: Auth Failures                  | cross-origin, state     | csrf, replay                          | Minimal  |
+| 8 | A08: Software/Data Integrity        | cache                   | etag, 304                             | Indirect |
+| 9 | A09: Logging/Monitoring Failures    | —                       | —                                     | None     |
+|10 | A10: SSRF                           | cross-origin            | redirect                              | Minimal  |
+
+** A05: Security Misconfiguration — strongest coverage
+
+hax's header predicates directly check security configuration:
+- ~csp~: Content-Security-Policy presence
+- ~hsts~: Strict-Transport-Security with max-age
+- ~samesite~: Cookie SameSite attribute
+- ~corp~: Cross-Origin-Resource-Policy
+- ~no-store~: Cache-Control no-store directive
+- ~vary~: Vary header for cache key correctness
+
+These are RFC-grounded, stateless, and directly observable from HTTP
+responses. The Tenzai study found 0/15 AI-built apps set /any/ of these.
+
+** A01: Broken Access Control — partial coverage
+
+hax tests access control properties at the HTTP layer:
+- CORS misconfiguration: ~cors~ predicate checks wildcard origins
+- CSRF protection: ~csrf~ predicate (stateful, requires multi-request)
+- Open redirects: ~redirect~ predicate checks redirect-to-HTTP downgrade
+- Method confusion: ~method-rotate~ mutation tests verb tampering
+- Workflow bypass: ~workflow-skip~ predicate (stateful, planned)
+
+Missing: path traversal, IDOR, JWT validation — application-specific,
+outside hax's HTTP-axiom scope.
+
+** A04: Insecure Design — partial coverage
+
+hax tests design-level HTTP semantics:
+- ~idempotency~: Do PUT/DELETE behave identically on retry?
+- ~safety~: Do GET/HEAD avoid side effects?
+- ~toctou~: Time-of-check-to-time-of-use race conditions
+- ~retries~: Does the server handle repeated identical requests correctly?
+
+These require multi-request tests (planned for ~hax run~ pipeline).
+
+** Gaps that are explicit non-goals
+
+| OWASP Item                   | Why hax doesn't cover it                              |
+|------------------------------+-------------------------------------------------------|
+| A06: Vulnerable Components   | Requires dependency scanning (SCA tools: Snyk, Trivy) |
+| A09: Logging/Monitoring      | Server-side concern, not observable from HTTP          |
+| A03: Injection (full)        | Requires application-specific payloads (SQLi, XSS)    |
+| A02: Crypto (full)           | TLS config testing is a separate domain (testssl.sh)   |
+
+* Mutation operators and attack patterns
+
+Each mutation maps to a class of HTTP-level attack:
+
+| Mutation            | Attack Pattern                            | OWASP Alignment    |
+|---------------------+-------------------------------------------+--------------------|
+| method-rotate       | HTTP verb tampering                       | A01 (access ctrl)  |
+| header-omit         | Missing security headers                  | A05 (misconfig)    |
+| header-corrupt      | Malformed header injection                | A03 (injection)    |
+| header-forge        | XFF/X-Real-IP spoofing, path override     | A01 (access ctrl)  |
+| origin-cross-site   | Cross-origin request probing              | A01 (CORS/CSRF)    |
+| origin-same-site    | Same-site origin testing                  | A01 (CSRF)         |
+| repeat-N            | Replay attacks, idempotency testing       | A04 (design)       |
+| repeat-concurrent   | Race conditions, TOCTOU                   | A04 (design)       |
+
+* RFC predicate grounding
+
+| RFC      | Title                                           | hax Predicates                    |
+|----------+-------------------------------------------------+-----------------------------------|
+| RFC 9110 | HTTP Semantics                                  | idempotency, safety, retries      |
+| RFC 9111 | HTTP Caching                                    | etag, no-store, vary, 304         |
+| RFC 6797 | HTTP Strict Transport Security (HSTS)           | hsts                              |
+| RFC 6454 | The Web Origin Concept                          | cors, origin-cross-site           |
+| W3C CSP3 | Content Security Policy Level 3                 | csp                               |
+| Fetch    | WHATWG Fetch Standard (CORS)                    | cors, origin-cross-site           |
+| 6265bis  | SameSite Cookies (RFC 6265bis)                  | samesite                          |
+| CORP     | Cross-Origin-Resource-Policy                    | corp                              |
+
+* Roadmap: predicate gaps to fill
+
+** High priority (A01/A05 header gaps)
+
+- [ ] ~x-frame-options~: Clickjacking prevention (headers group)
+- [ ] ~x-content-type-options~: MIME sniffing prevention (headers group)
+- [ ] ~referrer-policy~: Information leakage control (headers group)
+- [ ] ~permissions-policy~: Feature policy restrictions (headers group)
+
+** Medium priority (A04 stateful tests, requires ~hax run~ pipeline)
+
+- [ ] ~idempotency~ implementation: Send PUT/DELETE twice, compare
+- [ ] ~safety~ implementation: Send GET, verify no side effects
+- [ ] ~csrf~ implementation: Cross-origin POST without token
+- [ ] ~replay~ implementation: Replay authenticated request after delay
+
+** Lower priority (extended coverage)
+
+- [ ] ~jsonp~ implementation: Callback parameter injection check
+- [ ] ~304~ implementation: Conditional GET with If-None-Match
+- [ ] ~workflow-skip~ implementation: Skip steps in multi-request flow
+- [ ] ~toctou~ implementation: Concurrent read-then-write race
+
+* OWASP Top 10 for Agentic Applications (ASI, 2026) — supplementary
+
+The OWASP ASI Top 10 (v2026, December 2025) addresses risks specific
+to AI agent systems. While hax is not an agentic security tool, the
+ASI framework provides context for how hax might be used by or
+applied to agentic systems.
+
+The full document is available via ~make fetch-owasp~ (gitignored PDF).
+
+| ASI ID | Name                              | Relevance to hax                              |
+|--------+-----------------------------------+-----------------------------------------------|
+| ASI01  | Agent Goal Hijack                 | Low — hax tests HTTP, not agent orchestration  |
+| ASI02  | Tool Misuse & Exploitation        | Medium — hax /is/ a tool; safe by design       |
+| ASI03  | Identity & Privilege Abuse        | Low — hax doesn't manage credentials           |
+| ASI04  | Agentic Supply Chain              | Low — zero-dep binary, no runtime loading      |
+| ASI05  | Unexpected Code Execution (RCE)   | Low — hax is read-only HTTP probing            |
+| ASI06  | Memory & Context Poisoning        | Low — hax is stateless per-run                 |
+| ASI07  | Insecure Inter-Agent Comms        | Low — single-binary, no agent-to-agent         |
+| ASI08  | Cascading Failures                | Medium — ~--fail-fast~ prevents cascade        |
+| ASI09  | Human-Agent Trust Exploitation    | Medium — clear verdict output, no persuasion   |
+| ASI10  | Rogue Agents                      | Low — hax has no autonomous decision-making    |
+
+The main ASI relevance: when an agent uses hax as a tool (e.g., via
+MCP), the agent should apply least-privilege (ASI02) and not blindly
+trust hax output (ASI09). The Tenzai study's finding that 0/15
+AI-built apps set security headers is the concrete motivation.
+
+* The gap http-axiom fills
+
+Most engineering organisations run SAST (Semgrep, Snyk) and some run DAST
+(ZAP, Burp). Fewer run API PBT (Schemathesis). Almost none run protocol
+axiom testing — the properties that hold before any application logic runs.
+
+The Tenzai data makes the specific gap concrete: the properties in L1 are
+the ones AI coding agents miss universally and consistently. SAST does not
+catch them because they are configuration omissions, not code vulnerabilities.
+DAST in scanner mode finds some headers but does not generate the mutation
+vocabulary (missing CSRF token, cross-site Origin, idempotent replay) that
+reveals the logical gaps.
+
+PBT is specifically well-suited here because:
+
+- The mutation vocabulary is finite and RFC-defined (not application-specific)
+- Shrinking produces minimal failing cases (e.g., "POST without X-CSRF-Token
+  returns 200" rather than a full request trace)
+- The Hypothesis database retains known failures across runs
+
+The intended usage is as a CI gate on any endpoint that handles
+state-changing requests, added once to the pipeline and maintained at
+zero-per-endpoint cost — the same model that makes Schemathesis valuable
+at L2.
+
+* Is this typical for engineering organisations?
+
+No. Protocol-level property testing is not standard practice in most
+engineering organisations. What is standard varies by maturity:
+
+| Maturity level | Typical practice |
+|----------------|-----------------|
+| Early-stage startup | No systematic security testing |
+| Growth-stage | SAST in CI (Snyk, Semgrep), maybe ZAP |
+| Security-conscious | SAST + DAST + manual pen test annually |
+| High-assurance (fintech, health) | Above + API contract testing + bug bounty |
+| Rare | L1 protocol PBT (http-axiom class of tool) |
+
+The Veracode finding that 45% of AI-generated code introduces OWASP Top 10
+vulnerabilities suggests that the gap between "security-conscious" and
+"adequate for AI-velocity codebases" is widening. The standard practice
+was calibrated for human-written code at human velocity; neither assumption
+holds in 2026.
+
+The OWASP Top 10 for Agentic Applications 2026 is the first standards-body
+acknowledgment that agentic code generation requires its own threat taxonomy.
+It does not yet address protocol-level gaps specifically, but "generating
+vulnerable code" appears explicitly as a top-ten risk.
+
+The situation is noted as a concern, but not yet addressed with tooling at
+the L1 protocol level. That is the gap this project occupies.
