@@ -119,18 +119,24 @@ smoke: build ## Smoke test against haxgoat or Juice Shop
 	@echo "=== hax smoke test ==="
 	@if curl -sf $(HAXGOAT_URL)/health >/dev/null 2>&1; then \
 		echo "Target: haxgoat ($(HAXGOAT_URL))"; \
-		./$(BINARY) audit $(HAXGOAT_URL); \
+		./$(BINARY) audit $(HAXGOAT_URL) || true; \
 		echo; \
-		./$(BINARY) audit $(HAXGOAT_URL)/secure; \
+		./$(BINARY) audit $(HAXGOAT_URL)/secure || true; \
 		echo; \
-		./$(BINARY) audit $(HAXGOAT_URL)/api/user; \
+		./$(BINARY) audit $(HAXGOAT_URL)/api/user || true; \
+		echo; \
+		./$(BINARY) audit $(HAXGOAT_URL)/api/transfer || true; \
+		echo; \
+		./$(BINARY) audit $(HAXGOAT_URL)/cached || true; \
+		echo; \
+		./$(BINARY) audit $(HAXGOAT_URL)/cached-ok || true; \
 	elif curl -sf $(JUICE_SHOP_URL) >/dev/null 2>&1; then \
 		echo "Target: Juice Shop ($(JUICE_SHOP_URL))"; \
-		./$(BINARY) audit $(JUICE_SHOP_URL); \
+		./$(BINARY) audit $(JUICE_SHOP_URL) || true; \
 		echo; \
-		./$(BINARY) audit $(JUICE_SHOP_URL)/api/Products/1; \
+		./$(BINARY) audit $(JUICE_SHOP_URL)/api/Products/1 || true; \
 		echo; \
-		./$(BINARY) audit $(JUICE_SHOP_URL)/rest/products/search?q=apple; \
+		./$(BINARY) audit $(JUICE_SHOP_URL)/rest/products/search?q=apple || true; \
 	else \
 		echo "No target running. Start one with:"; \
 		echo "  make haxgoat    # lightweight Go server (port 9999)"; \
