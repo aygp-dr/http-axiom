@@ -54,20 +54,55 @@ If an acceptance test fails, stop. Document what failed, what you
 tried, and what the blocker is. Do not proceed to the next step.
 Surface the failure as a CPRR refutation candidate.
 
+## Property Types
+
+Every predicate is one of three types (see docs/formal-model.org):
+
+- **Type 1 (Universal)**: `func(resp) Result` — single response, no request context.
+  CSP, HSTS, SameSite, CORP, X-Frame-Options, X-Content-Type-Options, Permissions-Policy.
+- **Type 2 (Relational)**: `func(req, resp) Result` — checks response against sent request.
+  CORS reflection, JSONP callback. Uses `RequestResponsePredicate`.
+- **Type 3 (Sequential)**: `func(client, target) Result` — sends its own requests.
+  Idempotency, safety, CSRF, 304, replay, TOCTOU, workflow-skip. Uses `MultiPredicate`.
+
+When adding a predicate, choose the minimal type that can verify the property.
+
+## Relevance Matrix
+
+Mutations route to specific predicate groups (not uniform fan-out):
+- `header-*` → headers
+- `method-rotate` → methods, cross-origin
+- `origin-*` → cross-origin, headers
+- `repeat-N` → methods, cache, state
+- `repeat-concurrent` → state, methods
+
+See `internal/relevance/relevance.go` for the matrix data structure.
+
 ## Project Layout
 
 ```
 main.go                      CLI entry point (hand-written arg routing)
 go.mod                       Module (zero deps)
 Makefile                     Build, test, lint, install
+cmd/haxgoat/                 Deliberately vulnerable test server (23 endpoints)
 internal/generator/          Request variant generation
-internal/mutation/           Mutation operators
-internal/predicate/          RFC-grounded predicate checks
+internal/mutation/           Mutation operators (8)
+internal/predicate/          RFC-grounded predicate checks (21 across 5 groups)
 internal/oracle/             Verdict + shrinking
+internal/executor/           HTTP request execution (single, repeat, concurrent)
+internal/relevance/          Mutation → predicate group routing matrix
+docs/formal-model.org        Property type theory and stack position
 ```
+
+## Tracking
+
+- `bd` (beads) for issue tracking — `bd ready` shows unblocked work
+- `cprr` for conjectures — each hypothesis tied to a bead
+- `aq` for inter-agent coordination
 
 ## Stack
 
 - Go 1.23+ (stdlib only)
 - Make for build orchestration
 - No external dependencies
+- L1 in the testing stack (see docs/formal-model.org)

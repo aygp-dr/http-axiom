@@ -1,0 +1,169 @@
+#+TITLE: Formal Model: HTTP Axioms as Properties
+#+AUTHOR: aygp-dr
+#+OPTIONS: toc:2 num:t
+
+* Core Abstraction
+
+Every hax predicate is a property in the property-based testing sense:
+
+#+begin_example
+∀ r ∈ RequestVariants(mutation, target):
+  P(execute(r)) = pass ∨ fail ∨ warn ∨ skip
+#+end_example
+
+Where:
+- ~RequestVariants~ is parameterized by a mutation operator and target URL
+- ~execute~ sends the HTTP request and collects the response(s)
+- ~P~ is a predicate grounded in an RFC or security specification
+- The oracle collects all results and produces a verdict
+
+This is structurally identical to QuickCheck/Hypothesis: generate inputs,
+apply them, check a property, shrink on failure.
+
+* Property Classification
+
+Predicates fall into three categories by their verification requirements:
+
+** Type 1: Universal properties (single response)
+
+#+begin_example
+∀ response from server:
+  header("Content-Security-Policy") ≠ ∅
+  ∧ ¬contains(csp.script-src, "unsafe-inline" ∧ "unsafe-eval")
+#+end_example
+
+These hold for every response regardless of request. Verifiable from
+a single GET. 7 implemented: CSP, HSTS, SameSite, CORP, X-Frame-Options,
+X-Content-Type-Options, Permissions-Policy.
+
+Formal property: safety invariant (must hold in every state).
+
+** Type 2: Relational properties (request × response)
+
+#+begin_example
+∀ req with Origin: evil.example.com:
+  response.ACAO ≠ req.Origin
+#+end_example
+
+These assert a relationship between what was sent and what came back.
+The mutation operator constructs the adversarial request; the predicate
+checks the response in context. 2 needed: CORS reflection, JSONP.
+
+Formal property: input-output relation (functional correctness).
+
+** Type 3: Sequential/concurrent properties (multi-request)
+
+#+begin_example
+∀ req ∈ {PUT, DELETE}:
+  let s1 = state_after(execute(req))
+  let s2 = state_after(execute(req))
+  s1 = s2
+#+end_example
+
+These require multiple requests to verify. The property is about
+server state transitions, not individual responses.
+
+| Property | Requests | What it checks |
+|----------|----------|----------------|
+| Idempotency | req, req, GET, GET | same state after 1st and Nth apply |
+| Safety | GET, baseline, GET | no state change from safe method |
+| 304 | GET(etag), GET(If-None-Match) | conditional response |
+| CSRF | GET(token), POST(no token) | rejection of unauthenticated mutation |
+| Replay | POST, POST(same body) | second rejected or deduplicated |
+| TOCTOU | POST×N concurrent | race condition detection |
+| Workflow | POST(step3, skip 1+2) | sequence enforcement |
+
+Formal property: state machine invariant (transition correctness).
+
+* The Relevance Matrix as a Product Type
+
+The relevance matrix constrains the generator:
+
+#+begin_example
+TestCase = Mutation × PredicateGroup[] × Method[] × NeedsRepeat
+#+end_example
+
+This is a product type: each test case is a tuple of (which mutation,
+which groups to check, which HTTP methods are meaningful, how many
+requests needed). The matrix eliminates the cartesian explosion of
+mutation × group × method by encoding domain knowledge about which
+combinations are semantically valid.
+
+| Mutation | Groups | Why |
+|----------|--------|-----|
+| header-omit | headers | omitting headers → header checks fail |
+| method-rotate | methods, cross-origin | verb matters for idempotency + CSRF |
+| origin-cross-site | cross-origin, headers | CORS + SameSite depend on origin |
+| repeat-N | methods, state, cache | repetition tests idempotency, replay, 304 |
+| repeat-concurrent | state, methods | concurrency tests TOCTOU, safety |
+
+Without the matrix, ~hax run~ would generate 8 mutations × 5 groups × 7
+methods = 280 combinations, most nonsensical (e.g., header-omit → TOCTOU).
+With the matrix, it generates ~20 targeted test cases.
+
+* Shrinking as Minimization
+
+When a property fails, the oracle minimizes the failing input:
+
+#+begin_example
+shrink(failing_request) = min { r' | r' ⊂ r ∧ P(execute(r')) = fail }
+#+end_example
+
+The shrink operations form a lattice over request complexity:
+- Remove headers (weaker request)
+- Simplify auth (none < bearer < basic)
+- Simplify origin (omitted < same-site < cross-site)
+- Reduce method (GET is simplest)
+- Reduce repeat count
+
+The minimal failing request is the /explanation/: it tells you exactly
+which aspect of the request triggers the failure.
+
+* Stack Position (L1)
+
+#+begin_example
+L0  Figma / design review        ← happy path only
+L1  http-axiom (hax)             ← protocol axioms (this project)
+L2  Schemathesis                 ← endpoint logic (needs OpenAPI)
+L3  Application PBT (hegel)      ← business rules
+L4  Stateful / model-based PBT   ← multi-step workflows
+L5  Antithesis / Bombadil        ← concurrent / distributed
+#+end_example
+
+L1 properties hold before any application logic runs. They are the
+foundation: every layer above assumes L1 is satisfied. A codebase
+with CSRF vulnerabilities cannot meaningfully test business logic.
+
+* Relationship to Formal Methods
+
+hax is not a formal verifier — it does not prove properties hold for all
+inputs. It is a /falsifier/: it searches for counterexamples. This is the
+QuickCheck/Hypothesis paradigm:
+
+- Specification: RFC 9110 §9.2.2 says PUT is idempotent
+- Property: PUT twice → same state
+- Generator: request variants with PUT method
+- Test: execute, compare state
+- Shrink: minimize the failing PUT to isolate the cause
+
+The relationship to formal methods is:
+- Model checking (TLA+, Alloy): exhaustive over a bounded state space
+- Property-based testing: random sampling with shrinking
+- hax: structured sampling via relevance matrix with shrinking
+
+hax trades completeness for practicality: it cannot prove safety, but
+it can find violations in seconds against a running server.
+
+* Connection to OWASP Top 10
+
+The OWASP Top 10 (2021) maps to property categories:
+
+| OWASP | Category | hax Property Type |
+|-------|----------|-------------------|
+| A01: Broken Access Control | CORS, CSRF, verb tampering | Type 2 + Type 3 |
+| A04: Insecure Design | Idempotency, safety, TOCTOU | Type 3 |
+| A05: Security Misconfiguration | All header predicates | Type 1 |
+| A07: Auth Failures | CSRF, replay | Type 3 |
+
+Type 1 properties (A05) are the lowest-hanging fruit and the most commonly
+absent in AI-generated code (Tenzai: 0/15 apps set security headers).
