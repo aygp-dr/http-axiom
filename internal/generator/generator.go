@@ -15,6 +15,7 @@ type Request struct {
 	Auth    string            `json:"auth,omitempty"`   // none, bearer, basic, cookie
 	Origin  string            `json:"origin,omitempty"` // same-site, cross-site, omitted
 	Repeat  int               `json:"repeat,omitempty"` // 0 = single
+	BaseURL string            `json:"base_url,omitempty"`
 }
 
 // Config controls request generation.

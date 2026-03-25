@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/aygp-dr/http-axiom/internal/generator"
 )
 
 // Build-time variables (set via ldflags).
@@ -177,20 +179,44 @@ Flags:
 	verbose("methods: %s", methods)
 	verbose("paths: %s", paths)
 
-	type request struct {
-		Method  string            `json:"method"`
-		Path    string            `json:"path"`
-		Headers map[string]string `json:"headers"`
+	// Parse comma-separated values into slices.
+	methodList := strings.Split(methods, ",")
+	pathList := strings.Split(paths, ",")
+
+	// Build config from defaults, then override with parsed flags.
+	cfg := generator.DefaultConfig()
+	cfg.Methods = methodList
+	cfg.Paths = pathList
+	cfg.Count = count
+	cfg.Seed = seed
+
+	// Generate request variants.
+	requests := generator.Generate(cfg)
+
+	// If --target is set, store it as BaseURL on each request.
+	if targetURL != "" {
+		for i := range requests {
+			requests[i].BaseURL = targetURL
+		}
 	}
 
-	// Stub: generate request variants from the cartesian product.
-	_ = methods
-	_ = paths
-	_ = count
-	_ = seed
+	// Output.
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(requests)
+		return
+	}
 
-	fmt.Fprintf(os.Stderr, "hax generate: not yet implemented\n")
-	os.Exit(1)
+	// Compact table: METHOD  PATH  AUTH  ORIGIN
+	fmt.Printf("%-10s %-30s %-10s %s\n", "METHOD", "PATH", "AUTH", "ORIGIN")
+	for _, r := range requests {
+		path := r.Path
+		if r.BaseURL != "" {
+			path = r.BaseURL + r.Path
+		}
+		fmt.Printf("%-10s %-30s %-10s %s\n", r.Method, path, r.Auth, r.Origin)
+	}
 }
 
 // cmdMutate applies mutation operators to HTTP requests.
