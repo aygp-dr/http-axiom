@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aygp-dr/http-axiom/internal/request"
@@ -17,6 +18,7 @@ type Config struct {
 	BaseURL     string        // e.g., "http://localhost:9999"
 	Timeout     time.Duration // per-request timeout (default 10s)
 	Concurrency int           // for repeat-concurrent (default 1)
+	Client      *http.Client  // optional; if nil, a default is created
 }
 
 // Result captures the outcome of executing a single request.Request.
@@ -41,8 +43,9 @@ func DefaultConfig() Config {
 func Execute(cfg Config, req request.Request) Result {
 	result := Result{Request: req}
 
-	client := &http.Client{
-		Timeout: cfg.Timeout,
+	client := cfg.Client
+	if client == nil {
+		client = &http.Client{Timeout: cfg.Timeout}
 	}
 
 	count := req.Repeat
@@ -70,12 +73,36 @@ func Execute(cfg Config, req request.Request) Result {
 	return result
 }
 
-// ExecuteBatch sends multiple requests sequentially.
+// ExecuteBatch sends multiple requests, sharing a single http.Client
+// across the batch for connection reuse. When Concurrency > 1,
+// requests are executed concurrently with a semaphore limiting
+// the number of in-flight goroutines.
 func ExecuteBatch(cfg Config, reqs []request.Request) []Result {
-	results := make([]Result, 0, len(reqs))
-	for _, req := range reqs {
-		results = append(results, Execute(cfg, req))
+	if cfg.Client == nil {
+		cfg.Client = &http.Client{Timeout: cfg.Timeout}
 	}
+
+	results := make([]Result, len(reqs))
+
+	if cfg.Concurrency > 1 {
+		sem := make(chan struct{}, cfg.Concurrency)
+		var wg sync.WaitGroup
+		for i, req := range reqs {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(idx int, r request.Request) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				results[idx] = Execute(cfg, r)
+			}(i, req)
+		}
+		wg.Wait()
+	} else {
+		for i, req := range reqs {
+			results[i] = Execute(cfg, req)
+		}
+	}
+
 	return results
 }
 

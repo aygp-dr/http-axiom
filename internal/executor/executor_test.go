@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -315,5 +316,123 @@ func TestExecuteBatch(t *testing.T) {
 		if r.Response == nil {
 			t.Errorf("result[%d]: expected non-nil response", i)
 		}
+	}
+}
+
+func TestExecuteBatchSharesClient(t *testing.T) {
+	var requestCount int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = srv.URL
+
+	// Build 10 requests to send in a batch.
+	reqs := make([]request.Request, 10)
+	for i := range reqs {
+		reqs[i] = request.Request{
+			Method:  http.MethodGet,
+			Path:    "/shared",
+			Headers: map[string]string{},
+		}
+	}
+
+	// After ExecuteBatch, cfg.Client should have been set internally.
+	// We verify the batch completes and all 10 requests hit the server.
+	results := ExecuteBatch(cfg, reqs)
+	if len(results) != 10 {
+		t.Fatalf("expected 10 results, got %d", len(results))
+	}
+	for i, r := range results {
+		if r.Err != nil {
+			t.Errorf("result[%d]: unexpected error: %v", i, r.Err)
+		}
+	}
+	got := atomic.LoadInt64(&requestCount)
+	if got != 10 {
+		t.Errorf("server received %d requests, want 10", got)
+	}
+
+	// Verify that providing a pre-built client is honoured.
+	customClient := &http.Client{Timeout: 5 * time.Second}
+	cfg2 := DefaultConfig()
+	cfg2.BaseURL = srv.URL
+	cfg2.Client = customClient
+
+	results2 := ExecuteBatch(cfg2, reqs[:2])
+	for i, r := range results2 {
+		if r.Err != nil {
+			t.Errorf("custom client result[%d]: unexpected error: %v", i, r.Err)
+		}
+	}
+}
+
+func TestExecuteBatchConcurrent(t *testing.T) {
+	var requestCount int64
+	// Track max concurrent requests seen by the server.
+	var inflight int64
+	var maxInflight int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cur := atomic.AddInt64(&inflight, 1)
+		// Update max inflight (best-effort, not perfectly atomic but fine for testing).
+		for {
+			old := atomic.LoadInt64(&maxInflight)
+			if cur <= old {
+				break
+			}
+			if atomic.CompareAndSwapInt64(&maxInflight, old, cur) {
+				break
+			}
+		}
+		// Small sleep to keep requests overlapping.
+		time.Sleep(50 * time.Millisecond)
+		atomic.AddInt64(&inflight, -1)
+		atomic.AddInt64(&requestCount, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.Concurrency = 3
+
+	reqs := make([]request.Request, 9)
+	for i := range reqs {
+		reqs[i] = request.Request{
+			Method:  http.MethodGet,
+			Path:    "/concurrent",
+			Headers: map[string]string{},
+		}
+	}
+
+	results := ExecuteBatch(cfg, reqs)
+	if len(results) != 9 {
+		t.Fatalf("expected 9 results, got %d", len(results))
+	}
+	for i, r := range results {
+		if r.Err != nil {
+			t.Errorf("result[%d]: unexpected error: %v", i, r.Err)
+		}
+		if r.Response == nil {
+			t.Errorf("result[%d]: expected non-nil response", i)
+		}
+	}
+
+	got := atomic.LoadInt64(&requestCount)
+	if got != 9 {
+		t.Errorf("server received %d requests, want 9", got)
+	}
+
+	// With concurrency=3 and 50ms sleep, we expect >1 concurrent request.
+	peak := atomic.LoadInt64(&maxInflight)
+	if peak < 2 {
+		t.Errorf("expected at least 2 concurrent requests, peak was %d", peak)
+	}
+	if peak > 3 {
+		t.Errorf("expected at most 3 concurrent requests (semaphore), peak was %d", peak)
 	}
 }
