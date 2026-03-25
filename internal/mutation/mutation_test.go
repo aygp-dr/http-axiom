@@ -30,10 +30,10 @@ func TestMethodRotateMutator(t *testing.T) {
 	for i, m := range methods {
 		r := baseRequest()
 		r.Method = m
-		got := MethodRotateMutator(r)
+		got := methodRotateMutator(r)
 		want := methods[(i+1)%len(methods)]
 		if got.Method != want {
-			t.Errorf("MethodRotateMutator(%q) = %q, want %q", m, got.Method, want)
+			t.Errorf("methodRotateMutator(%q) = %q, want %q", m, got.Method, want)
 		}
 	}
 }
@@ -41,37 +41,37 @@ func TestMethodRotateMutator(t *testing.T) {
 func TestMethodRotateMutator_UnknownMethod(t *testing.T) {
 	r := baseRequest()
 	r.Method = "FOOBAR"
-	got := MethodRotateMutator(r)
+	got := methodRotateMutator(r)
 	if got.Method != http.MethodGet {
-		t.Errorf("MethodRotateMutator(FOOBAR) = %q, want %q", got.Method, http.MethodGet)
+		t.Errorf("methodRotateMutator(FOOBAR) = %q, want %q", got.Method, http.MethodGet)
 	}
 }
 
 func TestHeaderOmitMutator(t *testing.T) {
 	r := baseRequest()
-	got := HeaderOmitMutator(r)
+	got := headerOmitMutator(r)
 	if len(got.Headers) != 0 {
-		t.Errorf("HeaderOmitMutator: headers not empty, got %d entries", len(got.Headers))
+		t.Errorf("headerOmitMutator: headers not empty, got %d entries", len(got.Headers))
 	}
 }
 
 func TestHeaderCorruptMutator(t *testing.T) {
 	r := baseRequest()
 	original := r.Headers["Content-Type"]
-	got := HeaderCorruptMutator(r)
+	got := headerCorruptMutator(r)
 	corrupted := got.Headers["Content-Type"]
 	if corrupted == original {
-		t.Error("HeaderCorruptMutator: value unchanged")
+		t.Error("headerCorruptMutator: value unchanged")
 	}
 	// The corrupted value should start with \x00\xff
 	if corrupted[:2] != "\x00\xff" {
-		t.Error("HeaderCorruptMutator: corrupted value does not start with expected bytes")
+		t.Error("headerCorruptMutator: corrupted value does not start with expected bytes")
 	}
 }
 
 func TestHeaderForgeMutator(t *testing.T) {
 	r := baseRequest()
-	got := HeaderForgeMutator(r)
+	got := headerForgeMutator(r)
 
 	expected := map[string]string{
 		"X-Forwarded-For": "127.0.0.1",
@@ -80,29 +80,29 @@ func TestHeaderForgeMutator(t *testing.T) {
 	}
 	for k, want := range expected {
 		if v, ok := got.Headers[k]; !ok {
-			t.Errorf("HeaderForgeMutator: missing header %q", k)
+			t.Errorf("headerForgeMutator: missing header %q", k)
 		} else if v != want {
-			t.Errorf("HeaderForgeMutator: header %q = %q, want %q", k, v, want)
+			t.Errorf("headerForgeMutator: header %q = %q, want %q", k, v, want)
 		}
 	}
 }
 
 func TestOriginCrossSiteMutator(t *testing.T) {
 	r := baseRequest()
-	got := OriginCrossSiteMutator(r)
+	got := originCrossSiteMutator(r)
 	if got.Origin != "cross-site" {
-		t.Errorf("OriginCrossSiteMutator: Origin = %q, want %q", got.Origin, "cross-site")
+		t.Errorf("originCrossSiteMutator: Origin = %q, want %q", got.Origin, "cross-site")
 	}
 	if got.Headers["Origin"] != "https://evil.example.com" {
-		t.Errorf("OriginCrossSiteMutator: Origin header = %q, want %q", got.Headers["Origin"], "https://evil.example.com")
+		t.Errorf("originCrossSiteMutator: Origin header = %q, want %q", got.Headers["Origin"], "https://evil.example.com")
 	}
 }
 
 func TestOriginSameSiteMutator(t *testing.T) {
 	r := baseRequest()
-	got := OriginSameSiteMutator(r)
+	got := originSameSiteMutator(r)
 	if got.Origin != "same-site" {
-		t.Errorf("OriginSameSiteMutator: Origin = %q, want %q", got.Origin, "same-site")
+		t.Errorf("originSameSiteMutator: Origin = %q, want %q", got.Origin, "same-site")
 	}
 }
 
@@ -146,23 +146,23 @@ func TestRepeatNMutator(t *testing.T) {
 	// When Repeat < 2, should be set to 3.
 	r := baseRequest()
 	r.Repeat = 0
-	got := RepeatNMutator(r)
+	got := repeatNMutator(r)
 	if got.Repeat != 3 {
-		t.Errorf("RepeatNMutator(Repeat=0) = %d, want 3", got.Repeat)
+		t.Errorf("repeatNMutator(Repeat=0) = %d, want 3", got.Repeat)
 	}
 
 	// When Repeat == 1, should be set to 3.
 	r.Repeat = 1
-	got = RepeatNMutator(r)
+	got = repeatNMutator(r)
 	if got.Repeat != 3 {
-		t.Errorf("RepeatNMutator(Repeat=1) = %d, want 3", got.Repeat)
+		t.Errorf("repeatNMutator(Repeat=1) = %d, want 3", got.Repeat)
 	}
 
 	// When Repeat >= 2, should be unchanged.
 	r.Repeat = 5
-	got = RepeatNMutator(r)
+	got = repeatNMutator(r)
 	if got.Repeat != 5 {
-		t.Errorf("RepeatNMutator(Repeat=5) = %d, want 5", got.Repeat)
+		t.Errorf("repeatNMutator(Repeat=5) = %d, want 5", got.Repeat)
 	}
 }
 
@@ -170,25 +170,25 @@ func TestRepeatConcurrentMutator(t *testing.T) {
 	// When Repeat < 2, should be set to 5.
 	r := baseRequest()
 	r.Repeat = 0
-	got := RepeatConcurrentMutator(r)
+	got := repeatConcurrentMutator(r)
 	if got.Repeat != 5 {
-		t.Errorf("RepeatConcurrentMutator(Repeat=0) = %d, want 5", got.Repeat)
+		t.Errorf("repeatConcurrentMutator(Repeat=0) = %d, want 5", got.Repeat)
 	}
 
 	// Should set X-Hax-Concurrent header.
 	if got.Headers["X-Hax-Concurrent"] != "true" {
-		t.Error("RepeatConcurrentMutator: X-Hax-Concurrent header not set")
+		t.Error("repeatConcurrentMutator: X-Hax-Concurrent header not set")
 	}
 
 	// When Repeat >= 2, Repeat should be unchanged.
 	r.Repeat = 10
-	got = RepeatConcurrentMutator(r)
+	got = repeatConcurrentMutator(r)
 	if got.Repeat != 10 {
-		t.Errorf("RepeatConcurrentMutator(Repeat=10) = %d, want 10", got.Repeat)
+		t.Errorf("repeatConcurrentMutator(Repeat=10) = %d, want 10", got.Repeat)
 	}
 	// Still should set concurrent header.
 	if got.Headers["X-Hax-Concurrent"] != "true" {
-		t.Error("RepeatConcurrentMutator: X-Hax-Concurrent header not set when Repeat >= 2")
+		t.Error("repeatConcurrentMutator: X-Hax-Concurrent header not set when Repeat >= 2")
 	}
 }
 
@@ -254,5 +254,77 @@ func TestAllOperators_Returns8Items(t *testing.T) {
 		if !expected[op] {
 			t.Errorf("AllOperators() contains unexpected operator %q", op)
 		}
+	}
+}
+
+// TestMutatorDoesNotModifyOriginal verifies that mutators deep-copy
+// the Headers map so the caller's original request is never modified.
+func TestMutatorDoesNotModifyOriginal(t *testing.T) {
+	original := generator.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{"Accept": "text/html"},
+	}
+	// Save a copy of original headers
+	originalAccept := original.Headers["Accept"]
+
+	// Apply header-forge mutation
+	Apply(original, []string{"header-forge"})
+
+	// Original must be unchanged
+	if original.Headers["Accept"] != originalAccept {
+		t.Error("mutation modified original request headers")
+	}
+	if _, exists := original.Headers["X-Forwarded-For"]; exists {
+		t.Error("mutation leaked X-Forwarded-For into original")
+	}
+}
+
+// TestHeaderCorruptDoesNotModifyOriginal verifies header-corrupt
+// does not corrupt the caller's original headers map.
+func TestHeaderCorruptDoesNotModifyOriginal(t *testing.T) {
+	original := generator.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{"Accept": "text/html"},
+	}
+	originalAccept := original.Headers["Accept"]
+
+	Apply(original, []string{"header-corrupt"})
+
+	if original.Headers["Accept"] != originalAccept {
+		t.Error("header-corrupt modified original request headers")
+	}
+}
+
+// TestOriginCrossSiteDoesNotModifyOriginal verifies origin-cross-site
+// does not leak an Origin header into the caller's original map.
+func TestOriginCrossSiteDoesNotModifyOriginal(t *testing.T) {
+	original := generator.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{"Accept": "text/html"},
+	}
+
+	Apply(original, []string{"origin-cross-site"})
+
+	if _, exists := original.Headers["Origin"]; exists {
+		t.Error("origin-cross-site leaked Origin header into original")
+	}
+}
+
+// TestRepeatConcurrentDoesNotModifyOriginal verifies repeat-concurrent
+// does not leak X-Hax-Concurrent into the caller's original map.
+func TestRepeatConcurrentDoesNotModifyOriginal(t *testing.T) {
+	original := generator.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{"Accept": "text/html"},
+	}
+
+	Apply(original, []string{"repeat-concurrent"})
+
+	if _, exists := original.Headers["X-Hax-Concurrent"]; exists {
+		t.Error("repeat-concurrent leaked X-Hax-Concurrent into original")
 	}
 }
