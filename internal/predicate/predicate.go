@@ -3,7 +3,10 @@
 package predicate
 
 import (
+	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -163,14 +166,60 @@ func checkCSP(resp *http.Response) Result {
 	return Result{"headers", "csp", "pass", val}
 }
 
+// parseHSTSMaxAge extracts the numeric max-age value from an HSTS header.
+// It handles edge cases: quoted values ("31536000"), spaces around '=',
+// and case-insensitive matching. Returns the parsed value and true on success,
+// or (0, false) if max-age is not present or not a valid integer.
+var hstsMaxAgeRe = regexp.MustCompile(`(?i)max-age\s*=\s*"?(\d+)"?`)
+
+func parseHSTSMaxAge(val string) (int64, bool) {
+	m := hstsMaxAgeRe.FindStringSubmatch(val)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// checkHSTS validates the Strict-Transport-Security header per:
+//   - RFC 6797 §6.1.1: max-age semantics — a value of 0 instructs the UA to
+//     remove the HSTS entry, effectively disabling protection.
+//   - RFC 6797 §6.1.2: includeSubDomains — without this directive, subdomain
+//     takeover can bypass HSTS for the apex domain.
+//
+// This predicate asserts: "HSTS max-age must be positive and sufficiently long
+// to prevent TLS downgrade between visits."
 func checkHSTS(resp *http.Response) Result {
 	val := resp.Header.Get("Strict-Transport-Security")
 	if val == "" {
 		return Result{"headers", "hsts", "fail", "Strict-Transport-Security header missing"}
 	}
-	if !strings.Contains(val, "max-age=") {
+
+	maxAge, ok := parseHSTSMaxAge(val)
+	if !ok {
 		return Result{"headers", "hsts", "warn", "HSTS missing max-age directive"}
 	}
+
+	// RFC 6797 §6.1.1: max-age=0 tells the browser to delete the HSTS entry.
+	if maxAge == 0 {
+		return Result{"headers", "hsts", "fail", "max-age=0 disables HSTS (RFC 6797 §6.1.1)"}
+	}
+
+	const minMaxAge int64 = 31536000 // 1 year in seconds
+
+	// Warn if max-age is too short — allows downgrade in the gap.
+	if maxAge < minMaxAge {
+		return Result{"headers", "hsts", "warn", fmt.Sprintf("max-age=%d is too short (< %d)", maxAge, minMaxAge)}
+	}
+
+	// RFC 6797 §6.1.2: includeSubDomains prevents subdomain takeover bypass.
+	if !strings.Contains(strings.ToLower(val), "includesubdomains") {
+		return Result{"headers", "hsts", "warn", "missing includeSubDomains"}
+	}
+
 	return Result{"headers", "hsts", "pass", val}
 }
 
