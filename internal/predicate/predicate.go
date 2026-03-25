@@ -85,11 +85,81 @@ func HeaderGroup() Group {
 	}
 }
 
+// parseCSPDirectives splits a CSP policy string on ";" into directives,
+// then splits each directive on whitespace into name → sources.
+// Example: "default-src 'self'; script-src 'self' cdn.example.com"
+// returns {"default-src": ["'self'"], "script-src": ["'self'", "cdn.example.com"]}.
+func parseCSPDirectives(policy string) map[string][]string {
+	directives := make(map[string][]string)
+	for _, raw := range strings.Split(policy, ";") {
+		tokens := strings.Fields(strings.TrimSpace(raw))
+		if len(tokens) == 0 {
+			continue
+		}
+		name := strings.ToLower(tokens[0])
+		directives[name] = tokens[1:]
+	}
+	return directives
+}
+
+// checkCSP validates that a Content-Security-Policy header is present and
+// that its directives do not nullify XSS protection.
+//
+// This predicate validates a security invariant: "CSP must not contain sources
+// that nullify its protective property." The implementation follows a
+// property-based testing pattern: first decompose the policy into structured
+// directives (parseCSPDirectives), then assert properties over that structure.
+// This separates parsing from judgement, making each independently testable
+// and composable — the same decomposition principle used in PBT generators.
 func checkCSP(resp *http.Response) Result {
 	val := resp.Header.Get("Content-Security-Policy")
 	if val == "" {
 		return Result{"headers", "csp", "fail", "Content-Security-Policy header missing"}
 	}
+
+	directives := parseCSPDirectives(val)
+
+	// Determine which sources govern script execution:
+	// script-src takes precedence; default-src is the fallback.
+	sources, directiveName := directives["script-src"], "script-src"
+	if _, hasScriptSrc := directives["script-src"]; !hasScriptSrc {
+		sources = directives["default-src"]
+		directiveName = "default-src"
+	}
+
+	// Build a set of lowercase sources for easy lookup.
+	srcSet := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		srcSet[strings.ToLower(s)] = true
+	}
+
+	// FAIL: both unsafe-inline and unsafe-eval completely disable XSS protection.
+	if srcSet["'unsafe-inline'"] && srcSet["'unsafe-eval'"] {
+		return Result{"headers", "csp", "fail",
+			"unsafe-inline + unsafe-eval in " + directiveName}
+	}
+
+	// WARN: unsafe-inline alone weakens CSP significantly.
+	if srcSet["'unsafe-inline'"] {
+		return Result{"headers", "csp", "warn",
+			"unsafe-inline in " + directiveName}
+	}
+
+	// WARN: wildcard or overly broad sources.
+	broadSources := []string{"*", "data:", "blob:", "https:"}
+	for _, broad := range broadSources {
+		if srcSet[broad] {
+			return Result{"headers", "csp", "warn",
+				"wildcard source (" + broad + ") in " + directiveName}
+		}
+	}
+
+	// WARN: no default-src means the policy has coverage gaps.
+	if _, hasDefault := directives["default-src"]; !hasDefault {
+		return Result{"headers", "csp", "warn",
+			"no default-src directive (policy has gaps)"}
+	}
+
 	return Result{"headers", "csp", "pass", val}
 }
 
