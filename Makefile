@@ -1,4 +1,4 @@
-.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp
+.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp haxgoat juice-shop juice-shop-stop smoke
 
 BINARY  := hax
 MODULE  := github.com/aygp-dr/http-axiom
@@ -92,6 +92,51 @@ quickstart: build-dev ## Run quickstart
 
 doctor: build-dev ## Run doctor
 	./$(BINARY) doctor
+
+# --------------------------------------------------------------------------
+# Test Targets
+# --------------------------------------------------------------------------
+
+JUICE_SHOP_PORT ?= 3000
+JUICE_SHOP_URL  := http://localhost:$(JUICE_SHOP_PORT)
+HAXGOAT_PORT    ?= 9999
+HAXGOAT_URL     := http://localhost:$(HAXGOAT_PORT)
+
+haxgoat: ## Run haxgoat (built-in vulnerable server)
+	$(GO) run ./cmd/haxgoat
+
+juice-shop: ## Start OWASP Juice Shop in Docker (port 3000)
+	@docker run --rm -d --name juice-shop -p $(JUICE_SHOP_PORT):3000 bkimminich/juice-shop
+	@echo "Juice Shop running at $(JUICE_SHOP_URL)"
+	@echo "  API docs: $(JUICE_SHOP_URL)/api-docs"
+	@echo "  Scoreboard: $(JUICE_SHOP_URL)/#/score-board"
+	@echo "Stop with: make juice-shop-stop"
+
+juice-shop-stop: ## Stop Juice Shop container
+	@docker stop juice-shop 2>/dev/null || true
+
+smoke: build ## Smoke test against haxgoat or Juice Shop
+	@echo "=== hax smoke test ==="
+	@if curl -sf $(HAXGOAT_URL)/health >/dev/null 2>&1; then \
+		echo "Target: haxgoat ($(HAXGOAT_URL))"; \
+		./$(BINARY) audit $(HAXGOAT_URL); \
+		echo; \
+		./$(BINARY) audit $(HAXGOAT_URL)/secure; \
+		echo; \
+		./$(BINARY) audit $(HAXGOAT_URL)/api/user; \
+	elif curl -sf $(JUICE_SHOP_URL) >/dev/null 2>&1; then \
+		echo "Target: Juice Shop ($(JUICE_SHOP_URL))"; \
+		./$(BINARY) audit $(JUICE_SHOP_URL); \
+		echo; \
+		./$(BINARY) audit $(JUICE_SHOP_URL)/api/Products/1; \
+		echo; \
+		./$(BINARY) audit $(JUICE_SHOP_URL)/rest/products/search?q=apple; \
+	else \
+		echo "No target running. Start one with:"; \
+		echo "  make haxgoat    # lightweight Go server (port 9999)"; \
+		echo "  make juice-shop # OWASP Juice Shop Docker (port 3000)"; \
+		exit 1; \
+	fi
 
 # --------------------------------------------------------------------------
 # Research
