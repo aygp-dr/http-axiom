@@ -69,6 +69,8 @@ func HeaderGroup() Group {
 			{"samesite", checkSameSite},
 			{"corp", checkCORP},
 			{"x-frame-options", checkXFrameOptions},
+			{"x-content-type-options", checkXContentTypeOptions},
+			{"permissions-policy", checkPermissionsPolicy},
 		},
 	}
 }
@@ -213,6 +215,30 @@ func checkXFrameOptions(resp *http.Response) Result {
 	default:
 		return Result{"headers", "x-frame-options", "warn", "unrecognized X-Frame-Options value: " + val}
 	}
+}
+
+func checkXContentTypeOptions(resp *http.Response) Result {
+	val := resp.Header.Get("X-Content-Type-Options")
+	if val == "" {
+		return Result{"headers", "x-content-type-options", "fail", "X-Content-Type-Options header missing"}
+	}
+	if strings.ToLower(val) != "nosniff" {
+		return Result{"headers", "x-content-type-options", "warn", "X-Content-Type-Options is not nosniff: " + val}
+	}
+	return Result{"headers", "x-content-type-options", "pass", val}
+}
+
+func checkPermissionsPolicy(resp *http.Response) Result {
+	val := resp.Header.Get("Permissions-Policy")
+	if val == "" {
+		// Check legacy Feature-Policy header.
+		val = resp.Header.Get("Feature-Policy")
+		if val != "" {
+			return Result{"headers", "permissions-policy", "pass", "Feature-Policy (legacy): " + val}
+		}
+		return Result{"headers", "permissions-policy", "warn", "Permissions-Policy header missing"}
+	}
+	return Result{"headers", "permissions-policy", "pass", val}
 }
 
 // ---------------------------------------------------------------------------

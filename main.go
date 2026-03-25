@@ -340,7 +340,7 @@ Flags:
 			Name       string   `json:"name"`
 			Predicates []string `json:"predicates"`
 		}{
-			{"headers", []string{"csp", "hsts", "samesite", "corp", "x-frame-options"}},
+			{"headers", []string{"csp", "hsts", "samesite", "corp", "x-frame-options", "x-content-type-options", "permissions-policy"}},
 			{"methods", []string{"idempotency", "safety", "retries"}},
 			{"cross-origin", []string{"csrf", "cors", "jsonp", "redirect"}},
 			{"cache", []string{"etag", "no-store", "vary", "304"}},
