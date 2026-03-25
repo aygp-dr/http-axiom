@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strings"
 	"time"
@@ -743,14 +744,34 @@ Flags:
 
 	verbose("auditing %s", url)
 
-	// Use GET instead of HEAD — HEAD responses often omit headers like
-	// Set-Cookie, which breaks SameSite checks on endpoints that do set cookies.
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	// Parse the target URL to extract base URL and path for executor.
+	parsed, err := neturl.Parse(url)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot reach %s: %v\n", url, err)
+		fmt.Fprintf(os.Stderr, "error: invalid URL %s: %v\n", url, err)
 		os.Exit(1)
 	}
+
+	baseURL := parsed.Scheme + "://" + parsed.Host
+	path := parsed.RequestURI()
+
+	// Build a request.Request and executor.Config, then execute via the
+	// shared executor which handles auth, origin, repeat, and pooling.
+	req := request.Request{
+		Method: "GET",
+		Path:   path,
+	}
+	cfg := executor.Config{
+		BaseURL: baseURL,
+		Timeout: 10 * time.Second,
+	}
+
+	result := executor.Execute(cfg, req)
+	if result.Err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot reach %s: %v\n", url, result.Err)
+		os.Exit(1)
+	}
+
+	resp := result.Response
 	defer resp.Body.Close()
 	// Discard the body so the connection can be reused.
 	io.Copy(io.Discard, resp.Body)
