@@ -11,6 +11,7 @@ import (
 
 	"github.com/aygp-dr/http-axiom/internal/generator"
 	"github.com/aygp-dr/http-axiom/internal/mutation"
+	"github.com/aygp-dr/http-axiom/internal/request"
 	"github.com/aygp-dr/http-axiom/internal/oracle"
 	"github.com/aygp-dr/http-axiom/internal/predicate"
 )
@@ -308,7 +309,7 @@ Flags:
 	}
 
 	// Read and parse JSON input.
-	var requests []generator.Request
+	var requests []request.Request
 	dec := json.NewDecoder(reader)
 	if err := dec.Decode(&requests); err != nil {
 		fmt.Fprintf(os.Stderr, "error: invalid JSON input: %v\n", err)
@@ -323,7 +324,7 @@ Flags:
 	verbose("mutating %d requests with operators: %s", len(requests), strings.Join(operators, ", "))
 
 	// Apply mutations to each request, producing one mutated request per operator per input.
-	var mutated []generator.Request
+	var mutated []request.Request
 	for _, req := range requests {
 		for _, op := range operators {
 			m := mutation.Apply(req, []string{op})

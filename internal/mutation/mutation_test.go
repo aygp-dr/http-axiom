@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/aygp-dr/http-axiom/internal/generator"
+	"github.com/aygp-dr/http-axiom/internal/request"
 )
 
-func baseRequest() generator.Request {
-	return generator.Request{
+func baseRequest() request.Request {
+	return request.Request{
 		Method: http.MethodGet,
 		Path:   "/test",
 		Headers: map[string]string{
@@ -260,7 +260,7 @@ func TestAllOperators_Returns8Items(t *testing.T) {
 // TestMutatorDoesNotModifyOriginal verifies that mutators deep-copy
 // the Headers map so the caller's original request is never modified.
 func TestMutatorDoesNotModifyOriginal(t *testing.T) {
-	original := generator.Request{
+	original := request.Request{
 		Method:  "GET",
 		Path:    "/",
 		Headers: map[string]string{"Accept": "text/html"},
@@ -283,7 +283,7 @@ func TestMutatorDoesNotModifyOriginal(t *testing.T) {
 // TestHeaderCorruptDoesNotModifyOriginal verifies header-corrupt
 // does not corrupt the caller's original headers map.
 func TestHeaderCorruptDoesNotModifyOriginal(t *testing.T) {
-	original := generator.Request{
+	original := request.Request{
 		Method:  "GET",
 		Path:    "/",
 		Headers: map[string]string{"Accept": "text/html"},
@@ -300,7 +300,7 @@ func TestHeaderCorruptDoesNotModifyOriginal(t *testing.T) {
 // TestOriginCrossSiteDoesNotModifyOriginal verifies origin-cross-site
 // does not leak an Origin header into the caller's original map.
 func TestOriginCrossSiteDoesNotModifyOriginal(t *testing.T) {
-	original := generator.Request{
+	original := request.Request{
 		Method:  "GET",
 		Path:    "/",
 		Headers: map[string]string{"Accept": "text/html"},
@@ -316,7 +316,7 @@ func TestOriginCrossSiteDoesNotModifyOriginal(t *testing.T) {
 // TestRepeatConcurrentDoesNotModifyOriginal verifies repeat-concurrent
 // does not leak X-Hax-Concurrent into the caller's original map.
 func TestRepeatConcurrentDoesNotModifyOriginal(t *testing.T) {
-	original := generator.Request{
+	original := request.Request{
 		Method:  "GET",
 		Path:    "/",
 		Headers: map[string]string{"Accept": "text/html"},

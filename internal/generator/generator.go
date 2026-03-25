@@ -5,18 +5,9 @@ package generator
 import (
 	"math/rand"
 	"net/http"
-)
 
-// Request represents a generated HTTP request variant.
-type Request struct {
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Headers map[string]string `json:"headers"`
-	Auth    string            `json:"auth,omitempty"`   // none, bearer, basic, cookie
-	Origin  string            `json:"origin,omitempty"` // same-site, cross-site, omitted
-	Repeat  int               `json:"repeat,omitempty"` // 0 = single
-	BaseURL string            `json:"base_url,omitempty"`
-}
+	"github.com/aygp-dr/http-axiom/internal/request"
+)
 
 // Config controls request generation.
 type Config struct {
@@ -45,12 +36,12 @@ func DefaultConfig() Config {
 }
 
 // Generate produces request variants by sampling from the config space.
-func Generate(cfg Config) []Request {
+func Generate(cfg Config) []request.Request {
 	rng := rand.New(rand.NewSource(cfg.Seed))
-	requests := make([]Request, 0, cfg.Count)
+	requests := make([]request.Request, 0, cfg.Count)
 
 	for i := 0; i < cfg.Count; i++ {
-		r := Request{
+		r := request.Request{
 			Method:  cfg.Methods[rng.Intn(len(cfg.Methods))],
 			Path:    cfg.Paths[rng.Intn(len(cfg.Paths))],
 			Auth:    cfg.Auth[rng.Intn(len(cfg.Auth))],

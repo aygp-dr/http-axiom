@@ -1,4 +1,4 @@
-// Package executor converts generator.Request values into real HTTP
+// Package executor converts request.Request values into real HTTP
 // requests, sends them, and collects results including timing data.
 package executor
 
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aygp-dr/http-axiom/internal/generator"
+	"github.com/aygp-dr/http-axiom/internal/request"
 )
 
 // Config controls how requests are executed.
@@ -19,9 +19,9 @@ type Config struct {
 	Concurrency int           // for repeat-concurrent (default 1)
 }
 
-// Result captures the outcome of executing a single generator.Request.
+// Result captures the outcome of executing a single request.Request.
 type Result struct {
-	Request   generator.Request // the original request
+	Request   request.Request // the original request
 	Response  *http.Response    // primary response (first for repeats)
 	Responses []*http.Response  // all responses for repeat-N/concurrent
 	Duration  time.Duration     // total execution time
@@ -38,7 +38,7 @@ func DefaultConfig() Config {
 }
 
 // Execute sends a single request and returns the result.
-func Execute(cfg Config, req generator.Request) Result {
+func Execute(cfg Config, req request.Request) Result {
 	result := Result{Request: req}
 
 	client := &http.Client{
@@ -71,7 +71,7 @@ func Execute(cfg Config, req generator.Request) Result {
 }
 
 // ExecuteBatch sends multiple requests sequentially.
-func ExecuteBatch(cfg Config, reqs []generator.Request) []Result {
+func ExecuteBatch(cfg Config, reqs []request.Request) []Result {
 	results := make([]Result, 0, len(reqs))
 	for _, req := range reqs {
 		results = append(results, Execute(cfg, req))
@@ -80,7 +80,7 @@ func ExecuteBatch(cfg Config, reqs []generator.Request) []Result {
 }
 
 // doRequest builds and sends a single HTTP request.
-func doRequest(client *http.Client, cfg Config, req generator.Request) (*http.Response, error) {
+func doRequest(client *http.Client, cfg Config, req request.Request) (*http.Response, error) {
 	fullURL := strings.TrimRight(cfg.BaseURL, "/") + req.Path
 
 	httpReq, err := http.NewRequest(req.Method, fullURL, nil)

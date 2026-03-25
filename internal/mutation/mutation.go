@@ -14,7 +14,7 @@ package mutation
 import (
 	"net/http"
 
-	"github.com/aygp-dr/http-axiom/internal/generator"
+	"github.com/aygp-dr/http-axiom/internal/request"
 )
 
 // Operator names.
@@ -40,7 +40,7 @@ func AllOperators() []string {
 }
 
 // Mutator is a function that transforms a request.
-type Mutator func(generator.Request) generator.Request
+type Mutator func(request.Request) request.Request
 
 // copyHeaders returns a shallow copy of the headers map.
 func copyHeaders(h map[string]string) map[string]string {
@@ -52,7 +52,7 @@ func copyHeaders(h map[string]string) map[string]string {
 }
 
 // methodRotateMutator cycles the method to the next in the standard list.
-func methodRotateMutator(r generator.Request) generator.Request {
+func methodRotateMutator(r request.Request) request.Request {
 	methods := []string{
 		http.MethodGet, http.MethodPost, http.MethodPut,
 		http.MethodDelete, http.MethodPatch, http.MethodHead,
@@ -69,14 +69,14 @@ func methodRotateMutator(r generator.Request) generator.Request {
 }
 
 // headerOmitMutator removes all custom headers from the request.
-func headerOmitMutator(r generator.Request) generator.Request {
+func headerOmitMutator(r request.Request) request.Request {
 	// Deep copy before clearing — the caller's map must not be affected.
 	r.Headers = make(map[string]string)
 	return r
 }
 
 // headerCorruptMutator corrupts header values with invalid bytes.
-func headerCorruptMutator(r generator.Request) generator.Request {
+func headerCorruptMutator(r request.Request) request.Request {
 	r.Headers = copyHeaders(r.Headers)
 	for k := range r.Headers {
 		r.Headers[k] = "\x00\xff" + r.Headers[k]
@@ -85,7 +85,7 @@ func headerCorruptMutator(r generator.Request) generator.Request {
 }
 
 // headerForgeMutator injects common forged headers.
-func headerForgeMutator(r generator.Request) generator.Request {
+func headerForgeMutator(r request.Request) request.Request {
 	r.Headers = copyHeaders(r.Headers)
 	r.Headers["X-Forwarded-For"] = "127.0.0.1"
 	r.Headers["X-Real-IP"] = "127.0.0.1"
@@ -94,7 +94,7 @@ func headerForgeMutator(r generator.Request) generator.Request {
 }
 
 // originCrossSiteMutator sets a cross-origin Origin header.
-func originCrossSiteMutator(r generator.Request) generator.Request {
+func originCrossSiteMutator(r request.Request) request.Request {
 	r.Headers = copyHeaders(r.Headers)
 	r.Origin = "cross-site"
 	r.Headers["Origin"] = "https://evil.example.com"
@@ -102,13 +102,13 @@ func originCrossSiteMutator(r generator.Request) generator.Request {
 }
 
 // originSameSiteMutator sets a same-site Origin header.
-func originSameSiteMutator(r generator.Request) generator.Request {
+func originSameSiteMutator(r request.Request) request.Request {
 	r.Origin = "same-site"
 	return r
 }
 
 // repeatNMutator sets the request to be replayed N times.
-func repeatNMutator(r generator.Request) generator.Request {
+func repeatNMutator(r request.Request) request.Request {
 	if r.Repeat < 2 {
 		r.Repeat = 3
 	}
@@ -116,7 +116,7 @@ func repeatNMutator(r generator.Request) generator.Request {
 }
 
 // repeatConcurrentMutator sets the request to be replayed concurrently.
-func repeatConcurrentMutator(r generator.Request) generator.Request {
+func repeatConcurrentMutator(r request.Request) request.Request {
 	if r.Repeat < 2 {
 		r.Repeat = 5
 	}
@@ -154,7 +154,7 @@ func Get(name string) (Mutator, bool) {
 }
 
 // Apply runs a sequence of named mutators on a request.
-func Apply(r generator.Request, operators []string) generator.Request {
+func Apply(r request.Request, operators []string) request.Request {
 	for _, name := range operators {
 		if fn, ok := Get(name); ok {
 			r = fn(r)

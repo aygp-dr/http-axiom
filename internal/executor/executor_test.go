@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aygp-dr/http-axiom/internal/generator"
+	"github.com/aygp-dr/http-axiom/internal/request"
 )
 
 // echoHandler writes back the method, path, and headers as JSON.
@@ -38,7 +38,7 @@ func TestExecuteSingleGET(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.BaseURL = srv.URL
 
-	req := generator.Request{
+	req := request.Request{
 		Method:  http.MethodGet,
 		Path:    "/test",
 		Headers: map[string]string{},
@@ -89,7 +89,7 @@ func TestExecutePOSTWithHeaders(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.BaseURL = srv.URL
 
-	req := generator.Request{
+	req := request.Request{
 		Method: http.MethodPost,
 		Path:   "/submit",
 		Headers: map[string]string{
@@ -142,7 +142,7 @@ func TestExecuteRepeat(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.BaseURL = srv.URL
 
-	req := generator.Request{
+	req := request.Request{
 		Method:  http.MethodGet,
 		Path:    "/repeat",
 		Headers: map[string]string{},
@@ -175,7 +175,7 @@ func TestExecuteTimeout(t *testing.T) {
 	cfg.BaseURL = srv.URL
 	cfg.Timeout = 100 * time.Millisecond
 
-	req := generator.Request{
+	req := request.Request{
 		Method:  http.MethodGet,
 		Path:    "/slow",
 		Headers: map[string]string{},
@@ -207,7 +207,7 @@ func TestExecuteAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := generator.Request{
+			req := request.Request{
 				Method:  http.MethodGet,
 				Path:    "/auth",
 				Headers: map[string]string{},
@@ -246,7 +246,7 @@ func TestExecuteOrigin(t *testing.T) {
 	cfg.BaseURL = srv.URL
 
 	t.Run("cross-site", func(t *testing.T) {
-		req := generator.Request{
+		req := request.Request{
 			Method:  http.MethodGet,
 			Path:    "/origin",
 			Headers: map[string]string{},
@@ -268,7 +268,7 @@ func TestExecuteOrigin(t *testing.T) {
 	})
 
 	t.Run("same-site", func(t *testing.T) {
-		req := generator.Request{
+		req := request.Request{
 			Method:  http.MethodGet,
 			Path:    "/origin",
 			Headers: map[string]string{},
@@ -298,7 +298,7 @@ func TestExecuteBatch(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.BaseURL = srv.URL
 
-	reqs := []generator.Request{
+	reqs := []request.Request{
 		{Method: http.MethodGet, Path: "/a", Headers: map[string]string{}},
 		{Method: http.MethodPost, Path: "/b", Headers: map[string]string{}},
 		{Method: http.MethodPut, Path: "/c", Headers: map[string]string{}},
