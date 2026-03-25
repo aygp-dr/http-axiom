@@ -239,3 +239,123 @@ func searchSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// COEP predicate tests
+// ---------------------------------------------------------------------------
+
+func TestCheckCOEP_RequireCorp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	result := checkCOEP(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckCOEP_Credentialless(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cross-Origin-Embedder-Policy", "credentialless")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	result := checkCOEP(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckCOEP_Missing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	result := checkCOEP(resp)
+	if result.Status != "warn" {
+		t.Errorf("expected warn, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// COOP predicate tests
+// ---------------------------------------------------------------------------
+
+func TestCheckCOOP_SameOrigin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	result := checkCOOP(resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckCOOP_Missing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	result := checkCOOP(resp)
+	if result.Status != "warn" {
+		t.Errorf("expected warn, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckCOOP_UnsafeNone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cross-Origin-Opener-Policy", "unsafe-none")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	result := checkCOOP(resp)
+	if result.Status != "warn" {
+		t.Errorf("expected warn, got %s: %s", result.Status, result.Detail)
+	}
+}

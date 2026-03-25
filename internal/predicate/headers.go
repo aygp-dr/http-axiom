@@ -21,6 +21,8 @@ func HeaderGroup() Group {
 			{Name: "x-content-type-options", Fn: checkXContentTypeOptions, Type: TypeUniversal},
 			{Name: "permissions-policy", Fn: checkPermissionsPolicy, Type: TypeUniversal},
 			{Name: "referrer-policy", Fn: checkReferrerPolicy, Type: TypeUniversal},
+			{Name: "coep", Fn: checkCOEP, Type: TypeUniversal},
+			{Name: "coop", Fn: checkCOOP, Type: TypeUniversal},
 		},
 	}
 }
@@ -331,4 +333,45 @@ func checkReferrerPolicy(resp *http.Response) Result {
 		return Result{GroupHeaders, "referrer-policy", "warn", "Referrer-Policy no-referrer-when-downgrade leaks to HTTPS targets"}
 	}
 	return Result{GroupHeaders, "referrer-policy", "warn", "unrecognized Referrer-Policy: " + val}
+}
+
+// checkCOEP validates the Cross-Origin-Embedder-Policy header.
+// COEP is a defense-in-depth header that prevents a document from loading
+// cross-origin resources that do not explicitly grant permission. When set
+// to "require-corp" or "credentialless", it enables cross-origin isolation
+// (together with COOP), which is required for SharedArrayBuffer and
+// high-resolution timers.
+func checkCOEP(resp *http.Response) Result {
+	val := resp.Header.Get("Cross-Origin-Embedder-Policy")
+	if val == "" {
+		return Result{GroupHeaders, "coep", "warn", "Cross-Origin-Embedder-Policy header missing"}
+	}
+	lower := strings.ToLower(strings.TrimSpace(val))
+	switch lower {
+	case "require-corp", "credentialless":
+		return Result{GroupHeaders, "coep", "pass", val}
+	default:
+		return Result{GroupHeaders, "coep", "warn", "unrecognized Cross-Origin-Embedder-Policy value: " + val}
+	}
+}
+
+// checkCOOP validates the Cross-Origin-Opener-Policy header.
+// COOP controls whether a top-level document shares a browsing context group
+// with cross-origin documents. "same-origin" provides the strongest isolation;
+// "same-origin-allow-popups" permits opened windows to retain a reference.
+// "unsafe-none" is the default browser behaviour and provides no isolation.
+func checkCOOP(resp *http.Response) Result {
+	val := resp.Header.Get("Cross-Origin-Opener-Policy")
+	if val == "" {
+		return Result{GroupHeaders, "coop", "warn", "Cross-Origin-Opener-Policy header missing"}
+	}
+	lower := strings.ToLower(strings.TrimSpace(val))
+	switch lower {
+	case "same-origin", "same-origin-allow-popups":
+		return Result{GroupHeaders, "coop", "pass", val}
+	case "unsafe-none":
+		return Result{GroupHeaders, "coop", "warn", "Cross-Origin-Opener-Policy set to unsafe-none (no isolation)"}
+	default:
+		return Result{GroupHeaders, "coop", "warn", "unrecognized Cross-Origin-Opener-Policy value: " + val}
+	}
 }
