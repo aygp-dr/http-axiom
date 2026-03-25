@@ -1,0 +1,13 @@
+STRUCTURAL: predicate.go (634 lines, 5 concerns) → 8 files within same package.
+
+types.go:        Result, Predicate types, NamedPred (with new Type field), group constants
+runner.go:       Run, RunWithRequest, RunMulti, NeedsMulti, NeedsRequest
+headers.go:      10 predicates (CSP/HSTS/SameSite/CORP/XFO/XCTO/PermPolicy/ReferrerPolicy/COEP/COOP)
+methods.go:      3 predicates (idempotency/safety as MultiPredicate, retries stub)
+crossorigin.go:  5 predicates (csrf/cors/cors-reflection/jsonp/redirect)
+cache.go:        4 predicates (etag/no-store/vary/304)
+state.go:        3 stubs (workflow-skip/toctou/replay)
+
+IMPACT: Zero API changes, zero import changes. All existing tests pass.
+Round 4 agents (5 parallel) had ZERO merge conflicts because each agent
+touched a different file. Before this split, rounds 1-2 had ~12 conflicts.
