@@ -3,12 +3,15 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/aygp-dr/http-axiom/internal/generator"
+	"github.com/aygp-dr/http-axiom/internal/oracle"
+	"github.com/aygp-dr/http-axiom/internal/predicate"
 )
 
 // Build-time variables (set via ldflags).
@@ -441,124 +444,54 @@ Flags:
 
 	verbose("auditing %s", url)
 
-	// Quick probe: can we reach the target?
+	// Use GET instead of HEAD — HEAD responses often omit headers like
+	// Set-Cookie, which breaks SameSite checks on endpoints that do set cookies.
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Head(url)
+	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: cannot reach %s: %v\n", url, err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
+	// Discard the body so the connection can be reused.
+	io.Copy(io.Discard, resp.Body)
 
-	type finding struct {
-		Group  string `json:"group"`
-		Check  string `json:"check"`
-		Status string `json:"status"` // "pass", "fail", "warn", "skip"
-		Detail string `json:"detail,omitempty"`
-	}
-
-	var findings []finding
-
-	// Header predicates.
-	headerChecks := map[string]string{
-		"csp":  "Content-Security-Policy",
-		"hsts": "Strict-Transport-Security",
-		"corp": "Cross-Origin-Resource-Policy",
-	}
-	for check, header := range headerChecks {
-		val := resp.Header.Get(header)
-		if val == "" {
-			findings = append(findings, finding{"headers", check, "fail", header + " header missing"})
-		} else {
-			findings = append(findings, finding{"headers", check, "pass", val})
-		}
+	// Run all predicate groups against the response.
+	var results []predicate.Result
+	for _, group := range predicate.AllGroups() {
+		results = append(results, predicate.Run(group, resp)...)
 	}
 
-	// SameSite check on Set-Cookie.
-	cookies := resp.Header.Values("Set-Cookie")
-	if len(cookies) == 0 {
-		findings = append(findings, finding{"headers", "samesite", "skip", "no cookies set"})
-	} else {
-		for _, c := range cookies {
-			if strings.Contains(strings.ToLower(c), "samesite") {
-				findings = append(findings, finding{"headers", "samesite", "pass", "SameSite attribute present"})
-			} else {
-				findings = append(findings, finding{"headers", "samesite", "warn", "cookie missing SameSite attribute"})
-			}
-		}
-	}
-
-	// CORS check.
-	corsHeader := resp.Header.Get("Access-Control-Allow-Origin")
-	if corsHeader == "*" {
-		findings = append(findings, finding{"cross-origin", "cors", "warn", "wildcard CORS origin"})
-	} else if corsHeader != "" {
-		findings = append(findings, finding{"cross-origin", "cors", "pass", corsHeader})
-	} else {
-		findings = append(findings, finding{"cross-origin", "cors", "skip", "no CORS headers"})
-	}
-
-	// Cache headers.
-	cacheControl := resp.Header.Get("Cache-Control")
-	etag := resp.Header.Get("ETag")
-	if cacheControl != "" {
-		findings = append(findings, finding{"cache", "cache-control", "pass", cacheControl})
-	} else {
-		findings = append(findings, finding{"cache", "cache-control", "warn", "no Cache-Control header"})
-	}
-	if etag != "" {
-		findings = append(findings, finding{"cache", "etag", "pass", etag})
-	} else {
-		findings = append(findings, finding{"cache", "etag", "skip", "no ETag header"})
-	}
+	// Let the oracle judge the results.
+	verdict := oracle.Judge(url, results)
 
 	// Output.
 	if jsonOutput {
-		out := struct {
-			Target   string    `json:"target"`
-			Status   string    `json:"status"`
-			Findings []finding `json:"findings"`
-		}{
-			Target:   url,
-			Findings: findings,
-		}
-		// Determine overall status.
-		out.Status = "pass"
-		for _, f := range findings {
-			if f.Status == "fail" {
-				out.Status = "fail"
-				break
-			}
-		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(out)
+		enc.Encode(verdict)
 		return
 	}
 
 	// Table output.
 	fmt.Printf("Audit: %s\n\n", url)
-	passCount, failCount, warnCount, skipCount := 0, 0, 0, 0
-	for _, f := range findings {
+	for _, r := range verdict.Results {
 		marker := "?"
-		switch f.Status {
+		switch r.Status {
 		case "pass":
 			marker = "OK"
-			passCount++
 		case "fail":
 			marker = "FAIL"
-			failCount++
 		case "warn":
 			marker = "WARN"
-			warnCount++
 		case "skip":
 			marker = "SKIP"
-			skipCount++
 		}
-		fmt.Printf("  [%-4s] %-14s %-12s %s\n", marker, f.Group, f.Check, f.Detail)
+		fmt.Printf("  [%-4s] %-14s %-24s %s\n", marker, r.Group, r.Name, r.Detail)
 	}
-	fmt.Printf("\nSummary: %d pass, %d fail, %d warn, %d skip\n", passCount, failCount, warnCount, skipCount)
-	if failCount > 0 {
+	fmt.Printf("\nSummary: %d pass, %d fail, %d warn, %d skip\n",
+		verdict.Passed, verdict.Failed, verdict.Warned, verdict.Skipped)
+	if verdict.Status == "fail" {
 		os.Exit(1)
 	}
 }
