@@ -122,17 +122,73 @@ func TestGet_ImplementedMutators(t *testing.T) {
 	}
 }
 
-func TestGet_RepeatN_NotImplemented(t *testing.T) {
-	_, ok := Get(RepeatN)
-	if ok {
-		t.Error("Get(repeat-N) returned true, want false (not yet implemented)")
+func TestGet_RepeatN_Implemented(t *testing.T) {
+	fn, ok := Get(RepeatN)
+	if !ok {
+		t.Error("Get(repeat-N) returned false, want true")
+	}
+	if fn == nil {
+		t.Error("Get(repeat-N) returned nil function")
 	}
 }
 
-func TestGet_RepeatConcurrent_NotImplemented(t *testing.T) {
-	_, ok := Get(RepeatConcurrent)
-	if ok {
-		t.Error("Get(repeat-concurrent) returned true, want false (not yet implemented)")
+func TestGet_RepeatConcurrent_Implemented(t *testing.T) {
+	fn, ok := Get(RepeatConcurrent)
+	if !ok {
+		t.Error("Get(repeat-concurrent) returned false, want true")
+	}
+	if fn == nil {
+		t.Error("Get(repeat-concurrent) returned nil function")
+	}
+}
+
+func TestRepeatNMutator(t *testing.T) {
+	// When Repeat < 2, should be set to 3.
+	r := baseRequest()
+	r.Repeat = 0
+	got := RepeatNMutator(r)
+	if got.Repeat != 3 {
+		t.Errorf("RepeatNMutator(Repeat=0) = %d, want 3", got.Repeat)
+	}
+
+	// When Repeat == 1, should be set to 3.
+	r.Repeat = 1
+	got = RepeatNMutator(r)
+	if got.Repeat != 3 {
+		t.Errorf("RepeatNMutator(Repeat=1) = %d, want 3", got.Repeat)
+	}
+
+	// When Repeat >= 2, should be unchanged.
+	r.Repeat = 5
+	got = RepeatNMutator(r)
+	if got.Repeat != 5 {
+		t.Errorf("RepeatNMutator(Repeat=5) = %d, want 5", got.Repeat)
+	}
+}
+
+func TestRepeatConcurrentMutator(t *testing.T) {
+	// When Repeat < 2, should be set to 5.
+	r := baseRequest()
+	r.Repeat = 0
+	got := RepeatConcurrentMutator(r)
+	if got.Repeat != 5 {
+		t.Errorf("RepeatConcurrentMutator(Repeat=0) = %d, want 5", got.Repeat)
+	}
+
+	// Should set X-Hax-Concurrent header.
+	if got.Headers["X-Hax-Concurrent"] != "true" {
+		t.Error("RepeatConcurrentMutator: X-Hax-Concurrent header not set")
+	}
+
+	// When Repeat >= 2, Repeat should be unchanged.
+	r.Repeat = 10
+	got = RepeatConcurrentMutator(r)
+	if got.Repeat != 10 {
+		t.Errorf("RepeatConcurrentMutator(Repeat=10) = %d, want 10", got.Repeat)
+	}
+	// Still should set concurrent header.
+	if got.Headers["X-Hax-Concurrent"] != "true" {
+		t.Error("RepeatConcurrentMutator: X-Hax-Concurrent header not set when Repeat >= 2")
 	}
 }
 

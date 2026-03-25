@@ -94,6 +94,27 @@ func OriginSameSiteMutator(r generator.Request) generator.Request {
 	return r
 }
 
+// RepeatNMutator sets the request to be replayed N times.
+func RepeatNMutator(r generator.Request) generator.Request {
+	if r.Repeat < 2 {
+		r.Repeat = 3
+	}
+	return r
+}
+
+// RepeatConcurrentMutator sets the request to be replayed concurrently.
+func RepeatConcurrentMutator(r generator.Request) generator.Request {
+	if r.Repeat < 2 {
+		r.Repeat = 5
+	}
+	// Mark as concurrent via header marker.
+	if r.Headers == nil {
+		r.Headers = make(map[string]string)
+	}
+	r.Headers["X-Hax-Concurrent"] = "true"
+	return r
+}
+
 // Get returns the Mutator for a named operator.
 func Get(name string) (Mutator, bool) {
 	switch name {
@@ -109,6 +130,10 @@ func Get(name string) (Mutator, bool) {
 		return OriginCrossSiteMutator, true
 	case OriginSameSite:
 		return OriginSameSiteMutator, true
+	case RepeatN:
+		return RepeatNMutator, true
+	case RepeatConcurrent:
+		return RepeatConcurrentMutator, true
 	default:
 		return nil, false
 	}
