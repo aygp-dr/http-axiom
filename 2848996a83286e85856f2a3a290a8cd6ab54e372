@@ -1,0 +1,10 @@
+PIPELINE MILESTONE: hax check is the first command that exercises all three
+predicate types against a live target.
+
+Type-dispatched execution:
+  Universal (Type 1):  executor.Execute → predicate.Run(group, resp)
+  Relational (Type 2): http.NewRequest with Origin header → predicate.RunWithRequest(group, req, resp)
+  Sequential (Type 3): predicate.RunMulti(group, client, target)
+
+Dry-run mode shows all 25 predicates classified by type.
+This unblocks hax-d5d (run pipeline) and hax-no0 (shrink).
