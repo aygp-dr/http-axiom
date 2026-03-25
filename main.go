@@ -314,7 +314,7 @@ Flags:
 			Name       string   `json:"name"`
 			Predicates []string `json:"predicates"`
 		}{
-			{"headers", []string{"csp", "hsts", "samesite", "corp"}},
+			{"headers", []string{"csp", "hsts", "samesite", "corp", "x-frame-options"}},
 			{"methods", []string{"idempotency", "safety", "retries"}},
 			{"cross-origin", []string{"csrf", "cors", "jsonp", "redirect"}},
 			{"cache", []string{"etag", "no-store", "vary", "304"}},
@@ -332,7 +332,7 @@ Flags:
 
 	case "predicates":
 		predicates := []string{
-			"csp", "hsts", "samesite", "corp",
+			"csp", "hsts", "samesite", "corp", "x-frame-options",
 			"idempotency", "safety", "retries",
 			"csrf", "cors", "jsonp", "redirect",
 			"etag", "no-store", "vary", "304",
@@ -624,7 +624,7 @@ Quick start:
   hax check headers -t https://example.com # Check header predicates
 
 Predicate groups:
-  headers       CSP · HSTS · SameSite · CORP
+  headers       CSP · HSTS · SameSite · CORP · X-Frame-Options
   methods       idempotency · safety · retries
   cross-origin  CSRF · CORS · JSONP · redirect
   cache         ETag · no-store · Vary · 304
