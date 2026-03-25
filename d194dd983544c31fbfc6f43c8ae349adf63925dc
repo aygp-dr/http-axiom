@@ -1,0 +1,16 @@
+CPRR VALIDATION: Three P0 false negatives confirmed and fixed.
+
+C-001 (CSP): default-src * 'unsafe-inline' 'unsafe-eval' was passing.
+  Fix: parseCSPDirectives() → check script-src for unsafe-inline + unsafe-eval.
+  Evidence: haxgoat /weak-csp now FAILs. 7 CSP tests.
+
+C-002 (HSTS): max-age=0 was passing (disables HSTS per RFC 6797 §6.1.1).
+  Fix: parseHSTSMaxAge() → numeric comparison, fail on 0, warn on <31536000.
+  Evidence: haxgoat /hsts-zero now FAILs. 7 HSTS tests.
+
+C-007 (SameSite): SameSite=None without Secure was passing (browsers reject silently).
+  Fix: parseCookieAttrs() → extract value, check Secure co-presence.
+  Evidence: haxgoat /samesite-none-insecure now FAILs. 11 SameSite tests.
+
+METHOD: Each conjecture had a haxgoat endpoint designed to expose the false
+negative, and the fix was validated by running hax audit against it.
