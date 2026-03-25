@@ -70,7 +70,7 @@ func ByName(name string) (Group, bool) {
 }
 
 // ---------------------------------------------------------------------------
-// Header predicates: CSP, HSTS, SameSite, CORP, X-Frame-Options
+// Header predicates: CSP, HSTS, SameSite, CORP, X-Frame-Options, Referrer-Policy
 // ---------------------------------------------------------------------------
 
 func HeaderGroup() Group {
@@ -84,6 +84,7 @@ func HeaderGroup() Group {
 			{Name: "x-frame-options", Fn: checkXFrameOptions},
 			{Name: "x-content-type-options", Fn: checkXContentTypeOptions},
 			{Name: "permissions-policy", Fn: checkPermissionsPolicy},
+			{Name: "referrer-policy", Fn: checkReferrerPolicy},
 		},
 	}
 }
@@ -368,6 +369,35 @@ func checkPermissionsPolicy(resp *http.Response) Result {
 		return Result{"headers", "permissions-policy", "warn", "Permissions-Policy header missing"}
 	}
 	return Result{"headers", "permissions-policy", "pass", val}
+}
+
+// checkReferrerPolicy validates the Referrer-Policy header.
+//
+// The Referrer-Policy header controls how much referrer information is sent
+// with requests. Unsafe values leak the full URL (including path and query
+// parameters) to other origins, which can expose sensitive data.
+//
+// Safe values: no-referrer, strict-origin, strict-origin-when-cross-origin,
+// same-origin, origin, origin-when-cross-origin.
+// Warn values: unsafe-url (leaks full URL to all origins),
+// no-referrer-when-downgrade (browser default, leaks to HTTPS targets).
+func checkReferrerPolicy(resp *http.Response) Result {
+	val := resp.Header.Get("Referrer-Policy")
+	if val == "" {
+		return Result{"headers", "referrer-policy", "fail", "Referrer-Policy header missing"}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "unsafe-url":
+		return Result{"headers", "referrer-policy", "warn", "unsafe-url leaks full URL to all origins: " + val}
+	case "no-referrer-when-downgrade":
+		return Result{"headers", "referrer-policy", "warn", "no-referrer-when-downgrade leaks to HTTPS targets: " + val}
+	case "no-referrer", "strict-origin", "strict-origin-when-cross-origin",
+		"same-origin", "origin", "origin-when-cross-origin":
+		return Result{"headers", "referrer-policy", "pass", val}
+	default:
+		return Result{"headers", "referrer-policy", "warn", "unrecognized Referrer-Policy value: " + val}
+	}
 }
 
 // ---------------------------------------------------------------------------
