@@ -5,3 +5,7 @@ coverage.out
 *.prof
 docs/*.pdf
 model-architecture-original.svg
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "hax",
+  "project_id": "293e82f2-79d4-4a0f-ad5a-e807049f5e7f"
+}
