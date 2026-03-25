@@ -124,3 +124,118 @@ func TestCheckXFrameOptions_Unrecognized(t *testing.T) {
 		t.Errorf("expected warn, got %s: %s", result.Status, result.Detail)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CORS predicate tests
+// ---------------------------------------------------------------------------
+
+func TestCheckCORS_NullOrigin(t *testing.T) {
+	resp := &http.Response{
+		Header: http.Header{
+			"Access-Control-Allow-Origin": []string{"null"},
+		},
+	}
+	result := checkCORS(resp)
+	if result.Status != "fail" {
+		t.Errorf("expected fail for null origin, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckCORS_WildcardWithCredentials(t *testing.T) {
+	resp := &http.Response{
+		Header: http.Header{
+			"Access-Control-Allow-Origin":      []string{"*"},
+			"Access-Control-Allow-Credentials": []string{"true"},
+		},
+	}
+	result := checkCORS(resp)
+	if result.Status != "fail" {
+		t.Errorf("expected fail for wildcard+credentials, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CORS reflection predicate tests (RequestResponsePredicate)
+// ---------------------------------------------------------------------------
+
+func TestCheckCORSReflection_Reflected(t *testing.T) {
+	req, _ := http.NewRequest("GET", "http://target.example.com/api", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+
+	resp := &http.Response{
+		Header: http.Header{
+			"Access-Control-Allow-Origin": []string{"https://evil.example.com"},
+		},
+	}
+
+	result := checkCORSReflection(req, resp)
+	if result.Status != "fail" {
+		t.Errorf("expected fail for reflected origin, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckCORSReflection_ReflectedWithCredentials(t *testing.T) {
+	req, _ := http.NewRequest("GET", "http://target.example.com/api", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+
+	resp := &http.Response{
+		Header: http.Header{
+			"Access-Control-Allow-Origin":      []string{"https://evil.example.com"},
+			"Access-Control-Allow-Credentials": []string{"true"},
+		},
+	}
+
+	result := checkCORSReflection(req, resp)
+	if result.Status != "fail" {
+		t.Errorf("expected fail for reflected origin with credentials, got %s: %s", result.Status, result.Detail)
+	}
+	if result.Detail == "" || !contains(result.Detail, "credentials") {
+		t.Errorf("expected detail to mention credentials, got %q", result.Detail)
+	}
+}
+
+func TestCheckCORSReflection_NotReflected(t *testing.T) {
+	req, _ := http.NewRequest("GET", "http://target.example.com/api", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+
+	resp := &http.Response{
+		Header: http.Header{
+			"Access-Control-Allow-Origin": []string{"https://trusted.example.com"},
+		},
+	}
+
+	result := checkCORSReflection(req, resp)
+	if result.Status != "pass" {
+		t.Errorf("expected pass for non-reflected origin, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestCheckCORSReflection_NoOriginSent(t *testing.T) {
+	req, _ := http.NewRequest("GET", "http://target.example.com/api", nil)
+	// No Origin header set
+
+	resp := &http.Response{
+		Header: http.Header{
+			"Access-Control-Allow-Origin": []string{"*"},
+		},
+	}
+
+	result := checkCORSReflection(req, resp)
+	if result.Status != "skip" {
+		t.Errorf("expected skip when no Origin sent, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+// contains is a test helper for substring matching.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchSubstring(s, substr)
+}
+
+func searchSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

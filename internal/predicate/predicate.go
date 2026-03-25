@@ -289,6 +289,7 @@ func CrossOriginGroup() Group {
 		Predicates: []NamedPred{
 			{Name: "csrf", Fn: checkCSRF},
 			{Name: "cors", Fn: checkCORS},
+			{Name: "cors-reflection", ReqFn: checkCORSReflection},
 			{Name: "jsonp", Fn: checkJSONP},
 			{Name: "redirect", Fn: checkRedirect},
 		},
@@ -301,13 +302,63 @@ func checkCSRF(_ *http.Response) Result {
 
 func checkCORS(resp *http.Response) Result {
 	acao := resp.Header.Get("Access-Control-Allow-Origin")
+	acac := strings.ToLower(resp.Header.Get("Access-Control-Allow-Credentials"))
+
+	// "null" origin allows sandboxed iframe access — always a misconfiguration.
+	if acao == "null" {
+		return Result{"cross-origin", "cors", "fail", "CORS allows null origin (sandboxed iframe bypass)"}
+	}
+
 	if acao == "*" {
+		// Browsers reject wildcard + credentials, but the server's intent
+		// to allow credentialed cross-origin access is still dangerous.
+		if acac == "true" {
+			return Result{"cross-origin", "cors", "fail",
+				"wildcard CORS origin with Access-Control-Allow-Credentials: true (misconfigured — browsers reject, but intent is dangerous)"}
+		}
 		return Result{"cross-origin", "cors", "warn", "wildcard CORS origin"}
 	}
+
 	if acao != "" {
 		return Result{"cross-origin", "cors", "pass", acao}
 	}
 	return Result{"cross-origin", "cors", "skip", "no CORS headers present"}
+}
+
+// checkCORSReflection is a RequestResponsePredicate that detects the most
+// dangerous CORS misconfiguration: reflecting the request Origin verbatim
+// into Access-Control-Allow-Origin. When the mutation operator
+// "origin-cross-site" sets Origin: https://evil.example.com and the server
+// echoes it back, any site can read the response — with credentials if
+// Access-Control-Allow-Credentials: true is also set.
+//
+// Security invariant: "The server must not echo an attacker-controlled Origin
+// into Access-Control-Allow-Origin."
+func checkCORSReflection(req *http.Request, resp *http.Response) Result {
+	sentOrigin := req.Header.Get("Origin")
+	if sentOrigin == "" {
+		return Result{"cross-origin", "cors-reflection", "skip", "no Origin header in request"}
+	}
+
+	acao := resp.Header.Get("Access-Control-Allow-Origin")
+	if acao == "" {
+		return Result{"cross-origin", "cors-reflection", "pass", "no ACAO header in response"}
+	}
+
+	if acao != sentOrigin {
+		return Result{"cross-origin", "cors-reflection", "pass",
+			"ACAO does not reflect sent Origin"}
+	}
+
+	// Origin was reflected. Check for credentialed reflection (critical).
+	acac := strings.ToLower(resp.Header.Get("Access-Control-Allow-Credentials"))
+	if acac == "true" {
+		return Result{"cross-origin", "cors-reflection", "fail",
+			"origin reflection with credentials: sent " + sentOrigin + ", reflected in ACAO with Access-Control-Allow-Credentials: true (critical — any site can read credentialed responses)"}
+	}
+
+	return Result{"cross-origin", "cors-reflection", "fail",
+		"origin reflection: sent " + sentOrigin + ", reflected verbatim in Access-Control-Allow-Origin (any site can read response)"}
 }
 
 func checkJSONP(_ *http.Response) Result {
