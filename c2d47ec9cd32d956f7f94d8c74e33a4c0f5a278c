@@ -1,0 +1,17 @@
+SESSION: 2026-03-25 multi-agent bootstrap of http-axiom (hax)
+
+ORIGIN: Scaffolded from reference repos jwalsh/sb (worktree auditor) and
+jwalsh/cprr (hypothesis tracker) for the zero-dep hand-written CLI pattern,
+plus steveyegge/gastown and steveyegge/beads for Cobra-based architecture
+reference. Chose sb/cprr pattern: single main.go, stdlib only, no frameworks.
+
+ARCHITECTURE: Property-based HTTP axiom tester. Pipeline:
+  Request Generator → Mutation Vocabulary → Relevance Matrix → Predicate Groups → Oracle
+
+FORMAL MODEL: Every predicate is ∀ r ∈ RequestVariants(mutation, target): P(execute(r)) ∈ {pass,fail,warn,skip}
+Three property types: Universal (single resp), Relational (req×resp), Sequential (multi-request)
+
+STACK POSITION: L1 in testing hierarchy — protocol axioms that hold before application logic runs.
+L0=Figma, L1=hax, L2=Schemathesis, L3=Hegel, L4=StatefulPBT, L5=Antithesis
+
+TOOLS: bd (beads) for issue tracking, cprr for conjectures, aq for agent coordination, sb for worktrees.
