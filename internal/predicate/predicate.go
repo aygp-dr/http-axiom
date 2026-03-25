@@ -57,7 +57,7 @@ func ByName(name string) (Group, bool) {
 }
 
 // ---------------------------------------------------------------------------
-// Header predicates: CSP, HSTS, SameSite, CORP
+// Header predicates: CSP, HSTS, SameSite, CORP, X-Frame-Options
 // ---------------------------------------------------------------------------
 
 func HeaderGroup() Group {
@@ -68,6 +68,7 @@ func HeaderGroup() Group {
 			{"hsts", checkHSTS},
 			{"samesite", checkSameSite},
 			{"corp", checkCORP},
+			{"x-frame-options", checkXFrameOptions},
 		},
 	}
 }
@@ -191,6 +192,27 @@ func checkCORP(resp *http.Response) Result {
 		return Result{"headers", "corp", "fail", "Cross-Origin-Resource-Policy header missing"}
 	}
 	return Result{"headers", "corp", "pass", val}
+}
+
+func checkXFrameOptions(resp *http.Response) Result {
+	val := resp.Header.Get("X-Frame-Options")
+	if val == "" {
+		// Fall back: check CSP frame-ancestors directive.
+		csp := resp.Header.Get("Content-Security-Policy")
+		if csp != "" && strings.Contains(strings.ToLower(csp), "frame-ancestors") {
+			return Result{"headers", "x-frame-options", "pass", "frame-ancestors present in CSP: " + csp}
+		}
+		return Result{"headers", "x-frame-options", "fail", "X-Frame-Options header missing and no CSP frame-ancestors directive"}
+	}
+	upper := strings.ToUpper(val)
+	switch upper {
+	case "DENY", "SAMEORIGIN":
+		return Result{"headers", "x-frame-options", "pass", val}
+	case "ALLOWALL":
+		return Result{"headers", "x-frame-options", "warn", "X-Frame-Options set to ALLOWALL (no protection): " + val}
+	default:
+		return Result{"headers", "x-frame-options", "warn", "unrecognized X-Frame-Options value: " + val}
+	}
 }
 
 // ---------------------------------------------------------------------------
