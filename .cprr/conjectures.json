@@ -100,9 +100,61 @@
       ],
       "created_at": "2026-03-25T12:07:13.576836-04:00",
       "updated_at": "2026-03-25T17:26:20.48006-04:00"
+    },
+    {
+      "id": 8,
+      "title": "Mutation Apply violates immutability of input request",
+      "hypothesis": "Deep-copying Headers map in each mutator will prevent Apply from modifying the original request, provable by test: original.Headers unchanged after Apply.",
+      "status": "open",
+      "tags": [
+        "architecture",
+        "mutation",
+        "correctness"
+      ],
+      "created_at": "2026-03-25T17:55:30.719164-04:00",
+      "updated_at": "2026-03-25T17:55:30.719164-04:00"
+    },
+    {
+      "id": 9,
+      "title": "Request type in generator creates semantic confusion and cycle risk",
+      "hypothesis": "Extracting Request to internal/request/ will eliminate all generator imports that exist solely for the type (mutation, executor), reduce import edges by 2, and prevent future cycles.",
+      "status": "open",
+      "tags": [
+        "architecture",
+        "types",
+        "coupling"
+      ],
+      "created_at": "2026-03-25T17:55:30.7213-04:00",
+      "updated_at": "2026-03-25T17:55:30.7213-04:00"
+    },
+    {
+      "id": 10,
+      "title": "Predicate split reduces blast radius without API changes",
+      "hypothesis": "Splitting predicate.go into 7 files (types, runner, headers, methods, crossorigin, cache, state) within the same package will pass all existing tests with zero import or API changes.",
+      "status": "open",
+      "tags": [
+        "architecture",
+        "predicate",
+        "maintainability"
+      ],
+      "created_at": "2026-03-25T17:55:30.723363-04:00",
+      "updated_at": "2026-03-25T17:55:30.723363-04:00"
+    },
+    {
+      "id": 11,
+      "title": "cmdList hardcoded data diverges from predicate package",
+      "hypothesis": "Replacing cmdList string literals with predicate.AllGroups() iteration will show cors-reflection and referrer-policy that are currently hidden from hax list output.",
+      "status": "open",
+      "tags": [
+        "architecture",
+        "cli",
+        "data-integrity"
+      ],
+      "created_at": "2026-03-25T17:55:30.725454-04:00",
+      "updated_at": "2026-03-25T17:55:30.725454-04:00"
     }
   ],
-  "next_id": 8,
+  "next_id": 12,
   "config": {
     "local": true
   }

@@ -167,3 +167,47 @@ The OWASP Top 10 (2021) maps to property categories:
 
 Type 1 properties (A05) are the lowest-hanging fruit and the most commonly
 absent in AI-generated code (Tenzai: 0/15 apps set security headers).
+
+* L7 Architecture Review Findings (2026-03-25)
+
+** P0: Shallow-copy bug in mutation (R1)
+
+#+begin_example
+mutator := func(r generator.Request) generator.Request {
+    r.Headers["X-Forged"] = "value"  // BUG: mutates original's map
+    return r
+}
+#+end_example
+
+Go copies structs by value but maps are reference types. After
+~mutation.Apply~, the original request's ~Headers~ map is corrupted.
+This violates the property:
+
+#+begin_example
+∀ r, ops: Apply(r, ops) returns r' where r is unchanged
+#+end_example
+
+Fix: deep-copy the Headers map at the top of every mutator that
+reads or writes it.
+
+** Contract Tiers (actual vs expected)
+
+| Expected Tier   | Package         | Status           |
+|-----------------+-----------------+------------------|
+| Transport       | executor        | Partial (no pool)|
+| Generation      | generator       | Clean            |
+| Mutation        | mutation        | Clean (P0 fixed) |
+| Routing         | relevance       | Clean            |
+| Execution       | executor        | Clean            |
+| Verification    | predicate       | Overloaded       |
+| Judgement        | oracle          | Clean            |
+| Presentation    | (none — inline) | Missing          |
+
+** Structural Issues
+
+- ~generator.Request~ is the universal domain type but lives in ~generator~.
+  Should be ~internal/request/request.go~ (R4).
+- ~predicate.go~ is 634 lines with 5 concerns. Split into per-group files (R6).
+- ~NamedPred~ is an implicit tagged union. Needs explicit ~Type~ field (R5).
+- ~cmdList~ hardcodes predicate names instead of querying packages (R2).
+- Group names are string-coupled between relevance and predicate (R8).
