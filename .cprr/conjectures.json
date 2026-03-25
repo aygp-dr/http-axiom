@@ -122,14 +122,18 @@
       "id": 9,
       "title": "Request type in generator creates semantic confusion and cycle risk",
       "hypothesis": "Extracting Request to internal/request/ will eliminate all generator imports that exist solely for the type (mutation, executor), reduce import edges by 2, and prevent future cycles.",
-      "status": "open",
+      "evidence": [
+        "grep -rn generator.Request internal/ returns 0 matches. mutation and executor now import request, not generator.",
+        "Import edges reduced: mutation no longer depends on generator. Generator depends on request (leaf). No cycles possible."
+      ],
+      "status": "confirmed",
       "tags": [
         "architecture",
         "types",
         "coupling"
       ],
       "created_at": "2026-03-25T17:55:30.7213-04:00",
-      "updated_at": "2026-03-25T17:55:30.7213-04:00"
+      "updated_at": "2026-03-25T18:01:09.42173-04:00"
     },
     {
       "id": 10,
