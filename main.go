@@ -440,15 +440,19 @@ Flags:
 
 	switch what {
 	case "groups":
-		groups := []struct {
+		// Derive group listing from predicate.AllGroups() so that adding a
+		// predicate in internal/predicate automatically updates `hax list`.
+		type groupView struct {
 			Name       string   `json:"name"`
 			Predicates []string `json:"predicates"`
-		}{
-			{"headers", []string{"csp", "hsts", "samesite", "corp", "x-frame-options", "x-content-type-options", "permissions-policy"}},
-			{"methods", []string{"idempotency", "safety", "retries"}},
-			{"cross-origin", []string{"csrf", "cors", "jsonp", "redirect"}},
-			{"cache", []string{"etag", "no-store", "vary", "304"}},
-			{"state", []string{"workflow-skip", "toctou", "replay"}},
+		}
+		var groups []groupView
+		for _, g := range predicate.AllGroups() {
+			names := make([]string, len(g.Predicates))
+			for i, p := range g.Predicates {
+				names[i] = p.Name
+			}
+			groups = append(groups, groupView{Name: g.Name, Predicates: names})
 		}
 		if jsonOutput {
 			enc := json.NewEncoder(os.Stdout)
@@ -461,12 +465,12 @@ Flags:
 		}
 
 	case "predicates":
-		predicates := []string{
-			"csp", "hsts", "samesite", "corp", "x-frame-options",
-			"idempotency", "safety", "retries",
-			"csrf", "cors", "jsonp", "redirect",
-			"etag", "no-store", "vary", "304",
-			"workflow-skip", "toctou", "replay",
+		// Derive predicate listing from predicate.AllGroups().
+		var predicates []string
+		for _, g := range predicate.AllGroups() {
+			for _, p := range g.Predicates {
+				predicates = append(predicates, p.Name)
+			}
 		}
 		if jsonOutput {
 			enc := json.NewEncoder(os.Stdout)
@@ -479,12 +483,8 @@ Flags:
 		}
 
 	case "mutations":
-		mutations := []string{
-			"method-rotate",
-			"header-omit", "header-corrupt", "header-forge",
-			"origin-cross-site", "origin-same-site",
-			"repeat-N", "repeat-concurrent",
-		}
+		// Derive mutation listing from mutation.AllOperators().
+		mutations := mutation.AllOperators()
 		if jsonOutput {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -683,17 +683,20 @@ Quick start:
   hax generate -t https://example.com     # Generate request variants
   hax check headers -t https://example.com # Check header predicates
 
-Predicate groups:
-  headers       CSP · HSTS · SameSite · CORP · X-Frame-Options
-  methods       idempotency · safety · retries
-  cross-origin  CSRF · CORS · JSONP · redirect
-  cache         ETag · no-store · Vary · 304
-  state         workflow skip · TOCTOU · replay
-
-Mutation vocabulary:
-  method-rotate · header-omit · header-corrupt · header-forge
-  origin-cross-site · origin-same-site · repeat-N · repeat-concurrent
+Predicate groups (run 'hax list groups' for live data):
 `)
+	// Derive predicate groups from the package so quickstart stays in sync.
+	for _, g := range predicate.AllGroups() {
+		names := make([]string, len(g.Predicates))
+		for i, p := range g.Predicates {
+			names[i] = p.Name
+		}
+		fmt.Printf("  %-14s %s\n", g.Name, strings.Join(names, " · "))
+	}
+
+	fmt.Println()
+	fmt.Println("Mutation vocabulary (run 'hax list mutations' for live data):")
+	fmt.Printf("  %s\n", strings.Join(mutation.AllOperators(), " · "))
 }
 
 // ---------------------------------------------------------------------------
