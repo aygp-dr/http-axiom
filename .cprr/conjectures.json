@@ -105,14 +105,18 @@
       "id": 8,
       "title": "Mutation Apply violates immutability of input request",
       "hypothesis": "Deep-copying Headers map in each mutator will prevent Apply from modifying the original request, provable by test: original.Headers unchanged after Apply.",
-      "status": "open",
+      "evidence": [
+        "4 regression tests: header-forge, header-corrupt, origin-cross-site, repeat-concurrent all prove original unchanged",
+        "copyHeaders() deep-copies map before mutation; all 8 mutators unexported (public API: Get/Apply only)"
+      ],
+      "status": "confirmed",
       "tags": [
         "architecture",
         "mutation",
         "correctness"
       ],
       "created_at": "2026-03-25T17:55:30.719164-04:00",
-      "updated_at": "2026-03-25T17:55:30.719164-04:00"
+      "updated_at": "2026-03-25T17:56:34.159325-04:00"
     },
     {
       "id": 9,
@@ -131,27 +135,35 @@
       "id": 10,
       "title": "Predicate split reduces blast radius without API changes",
       "hypothesis": "Splitting predicate.go into 7 files (types, runner, headers, methods, crossorigin, cache, state) within the same package will pass all existing tests with zero import or API changes.",
-      "status": "open",
+      "evidence": [
+        "8 files created, predicate.go deleted. go build + go test pass. Zero API/import changes.",
+        "NamedPred.Type field added: TypeUniversal=1, TypeRelational=2, TypeSequential=3. Group name constants exported."
+      ],
+      "status": "confirmed",
       "tags": [
         "architecture",
         "predicate",
         "maintainability"
       ],
       "created_at": "2026-03-25T17:55:30.723363-04:00",
-      "updated_at": "2026-03-25T17:55:30.723363-04:00"
+      "updated_at": "2026-03-25T17:58:53.989675-04:00"
     },
     {
       "id": 11,
       "title": "cmdList hardcoded data diverges from predicate package",
       "hypothesis": "Replacing cmdList string literals with predicate.AllGroups() iteration will show cors-reflection and referrer-policy that are currently hidden from hax list output.",
-      "status": "open",
+      "evidence": [
+        "hax list groups now shows cors-reflection and referrer-policy — were hidden in hardcoded version",
+        "23 predicates listed dynamically from predicate.AllGroups() — was 19 hardcoded"
+      ],
+      "status": "confirmed",
       "tags": [
         "architecture",
         "cli",
         "data-integrity"
       ],
       "created_at": "2026-03-25T17:55:30.725454-04:00",
-      "updated_at": "2026-03-25T17:55:30.725454-04:00"
+      "updated_at": "2026-03-25T17:57:10.70274-04:00"
     }
   ],
   "next_id": 12,
