@@ -4,27 +4,35 @@
       "id": 1,
       "title": "CSP presence-only is insufficient",
       "hypothesis": "A CSP of 'default-src *' or 'unsafe-inline unsafe-eval' provides zero XSS protection yet passes current check. Parsing policy directives will catch \u003e80% of weak CSPs against haxgoat.",
-      "status": "open",
+      "evidence": [
+        "haxgoat /weak-csp: default-src * unsafe-inline unsafe-eval now correctly FAILs",
+        "7 CSP tests pass: missing/strong/weak/unsafe-inline-only/wildcard/no-default/granular"
+      ],
+      "status": "confirmed",
       "tags": [
         "headers",
         "csp",
         "false-negative"
       ],
       "created_at": "2026-03-25T12:07:13.564801-04:00",
-      "updated_at": "2026-03-25T12:07:13.564801-04:00"
+      "updated_at": "2026-03-25T17:26:20.469018-04:00"
     },
     {
       "id": 2,
       "title": "HSTS max-age=0 is a security regression",
       "hypothesis": "max-age=0 disables HSTS per RFC 6797. Parsing the numeric value and failing on \u003c31536000 will catch all HSTS downgrade misconfigurations.",
-      "status": "open",
+      "evidence": [
+        "haxgoat /hsts-zero: max-age=0 now correctly FAILs with RFC 6797 citation",
+        "7 HSTS tests pass: missing/maxage-zero/short/no-includesubdomains/full/preload/parser"
+      ],
+      "status": "confirmed",
       "tags": [
         "headers",
         "hsts",
         "rfc6797"
       ],
       "created_at": "2026-03-25T12:07:13.566963-04:00",
-      "updated_at": "2026-03-25T12:07:13.566963-04:00"
+      "updated_at": "2026-03-25T17:26:20.474917-04:00"
     },
     {
       "id": 3,
@@ -80,14 +88,18 @@
       "id": 7,
       "title": "SameSite=None without Secure is a browser-rejected cookie",
       "hypothesis": "Parsing SameSite attribute value and checking for Secure flag co-presence will catch the silent cookie rejection that current substring check misses.",
-      "status": "open",
+      "evidence": [
+        "haxgoat /samesite-none-insecure: SameSite=None without Secure now correctly FAILs",
+        "11 SameSite tests pass: no-cookies/missing-attr/none-no-secure/none-with-secure/strict/lax/mixed"
+      ],
+      "status": "confirmed",
       "tags": [
         "headers",
         "samesite",
         "false-negative"
       ],
       "created_at": "2026-03-25T12:07:13.576836-04:00",
-      "updated_at": "2026-03-25T12:07:13.576836-04:00"
+      "updated_at": "2026-03-25T17:26:20.48006-04:00"
     }
   ],
   "next_id": 8,
