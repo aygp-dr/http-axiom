@@ -18,6 +18,14 @@ type Result struct {
 // Predicate is a function that checks a response against an axiom.
 type Predicate func(resp *http.Response) Result
 
+// RequestResponsePredicate checks a response in context of the request that produced it.
+// Used for: CORS origin reflection, JSONP callback detection.
+type RequestResponsePredicate func(req *http.Request, resp *http.Response) Result
+
+// MultiPredicate performs its own HTTP requests to test multi-step properties.
+// Used for: idempotency, safety, retries, CSRF, 304, replay, TOCTOU, workflow-skip.
+type MultiPredicate func(client *http.Client, target string) Result
+
 // Group is a named collection of related predicates.
 type Group struct {
 	Name       string      `json:"name"`
@@ -26,8 +34,10 @@ type Group struct {
 
 // NamedPred pairs a predicate function with its name.
 type NamedPred struct {
-	Name string
-	Fn   Predicate
+	Name    string
+	Fn      Predicate                // single-response (existing)
+	ReqFn   RequestResponsePredicate // request+response (new, nil if unused)
+	MultiFn MultiPredicate           // multi-request (new, nil if unused)
 }
 
 // AllGroups returns every predicate group.
@@ -64,13 +74,13 @@ func HeaderGroup() Group {
 	return Group{
 		Name: "headers",
 		Predicates: []NamedPred{
-			{"csp", checkCSP},
-			{"hsts", checkHSTS},
-			{"samesite", checkSameSite},
-			{"corp", checkCORP},
-			{"x-frame-options", checkXFrameOptions},
-			{"x-content-type-options", checkXContentTypeOptions},
-			{"permissions-policy", checkPermissionsPolicy},
+			{Name: "csp", Fn: checkCSP},
+			{Name: "hsts", Fn: checkHSTS},
+			{Name: "samesite", Fn: checkSameSite},
+			{Name: "corp", Fn: checkCORP},
+			{Name: "x-frame-options", Fn: checkXFrameOptions},
+			{Name: "x-content-type-options", Fn: checkXContentTypeOptions},
+			{Name: "permissions-policy", Fn: checkPermissionsPolicy},
 		},
 	}
 }
@@ -249,9 +259,9 @@ func MethodGroup() Group {
 	return Group{
 		Name: "methods",
 		Predicates: []NamedPred{
-			{"idempotency", checkIdempotency},
-			{"safety", checkSafety},
-			{"retries", checkRetries},
+			{Name: "idempotency", Fn: checkIdempotency},
+			{Name: "safety", Fn: checkSafety},
+			{Name: "retries", Fn: checkRetries},
 		},
 	}
 }
@@ -277,10 +287,10 @@ func CrossOriginGroup() Group {
 	return Group{
 		Name: "cross-origin",
 		Predicates: []NamedPred{
-			{"csrf", checkCSRF},
-			{"cors", checkCORS},
-			{"jsonp", checkJSONP},
-			{"redirect", checkRedirect},
+			{Name: "csrf", Fn: checkCSRF},
+			{Name: "cors", Fn: checkCORS},
+			{Name: "jsonp", Fn: checkJSONP},
+			{Name: "redirect", Fn: checkRedirect},
 		},
 	}
 }
@@ -323,10 +333,10 @@ func CacheGroup() Group {
 	return Group{
 		Name: "cache",
 		Predicates: []NamedPred{
-			{"etag", checkETag},
-			{"no-store", checkNoStore},
-			{"vary", checkVary},
-			{"304", check304},
+			{Name: "etag", Fn: checkETag},
+			{Name: "no-store", Fn: checkNoStore},
+			{Name: "vary", Fn: checkVary},
+			{Name: "304", Fn: check304},
 		},
 	}
 }
@@ -370,9 +380,9 @@ func StateGroup() Group {
 	return Group{
 		Name: "state",
 		Predicates: []NamedPred{
-			{"workflow-skip", checkWorkflowSkip},
-			{"toctou", checkTOCTOU},
-			{"replay", checkReplay},
+			{Name: "workflow-skip", Fn: checkWorkflowSkip},
+			{Name: "toctou", Fn: checkTOCTOU},
+			{Name: "replay", Fn: checkReplay},
 		},
 	}
 }
@@ -389,11 +399,65 @@ func checkReplay(_ *http.Response) Result {
 	return Result{"state", "replay", "skip", "requires replay test"}
 }
 
-// Run executes all predicates in a group against a response.
+// Run executes single-response predicates in a group against a response.
+// Predicates that require request context (ReqFn) or multiple requests (MultiFn)
+// are skipped — use RunWithRequest or RunMulti for those.
 func Run(group Group, resp *http.Response) []Result {
 	results := make([]Result, 0, len(group.Predicates))
 	for _, p := range group.Predicates {
-		results = append(results, p.Fn(resp))
+		if p.MultiFn != nil && p.Fn == nil {
+			continue
+		}
+		if p.ReqFn != nil && p.Fn == nil {
+			continue
+		}
+		if p.Fn != nil {
+			results = append(results, p.Fn(resp))
+		}
 	}
 	return results
+}
+
+// RunWithRequest executes request+response predicates in a group.
+// Only predicates with ReqFn set are executed.
+func RunWithRequest(group Group, req *http.Request, resp *http.Response) []Result {
+	results := make([]Result, 0, len(group.Predicates))
+	for _, p := range group.Predicates {
+		if p.ReqFn != nil {
+			results = append(results, p.ReqFn(req, resp))
+		}
+	}
+	return results
+}
+
+// RunMulti executes multi-request predicates in a group.
+// Only predicates with MultiFn set are executed.
+func RunMulti(group Group, client *http.Client, target string) []Result {
+	results := make([]Result, 0, len(group.Predicates))
+	for _, p := range group.Predicates {
+		if p.MultiFn != nil {
+			results = append(results, p.MultiFn(client, target))
+		}
+	}
+	return results
+}
+
+// NeedsMulti reports whether any predicate in the group requires multi-request testing.
+func NeedsMulti(group Group) bool {
+	for _, p := range group.Predicates {
+		if p.MultiFn != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// NeedsRequest reports whether any predicate in the group requires request context.
+func NeedsRequest(group Group) bool {
+	for _, p := range group.Predicates {
+		if p.ReqFn != nil {
+			return true
+		}
+	}
+	return false
 }
