@@ -4,3 +4,4 @@ dist/
 coverage.out
 *.prof
 docs/*.pdf
+model-architecture-original.svg

@@ -1,4 +1,4 @@
-.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp haxgoat juice-shop juice-shop-stop smoke
+.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp haxgoat juice-shop juice-shop-stop smoke diagram
 
 BINARY  := hax
 MODULE  := github.com/aygp-dr/http-axiom
@@ -157,6 +157,16 @@ $(OWASP_PDF):
 	@mkdir -p docs
 	curl -sL -o $@ "$(OWASP_URL)"
 	@echo "downloaded $@ ($$(wc -c < $@ | tr -d ' ') bytes)"
+
+# --------------------------------------------------------------------------
+# Diagrams
+# --------------------------------------------------------------------------
+
+diagram: model-architecture.svg ## Regenerate architecture diagram from mermaid source
+
+model-architecture.svg: model-architecture.mmd
+	mmdc -i $< -o $@ -b transparent
+	@echo "regenerated $@ from $<"
 
 # --------------------------------------------------------------------------
 # Utility
