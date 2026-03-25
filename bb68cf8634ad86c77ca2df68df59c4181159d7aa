@@ -1,0 +1,21 @@
+L7 ARCHITECTURE REVIEW: Boundary decomposition analysis.
+
+P0 FOUND: Mutation shallow-copy bug — map[string]string is a reference type,
+mutators were corrupting the original request through shared map pointer.
+Fix: deep-copy Headers map at start of every mutator that touches it.
+
+STRUCTURAL ISSUES IDENTIFIED (R1-R10):
+R1: Shallow-copy (P0, fixed)
+R2: cmdList hardcoded data (P1, fixed)
+R4: generator.Request → request.Request (P1, fixed)
+R5: Explicit predicate Type field (P1, fixed via split)
+R6: predicate.go 634 lines → 8 files (P1, fixed)
+R8: String-coupled group names (P2, fixed via constants)
+R3: cmdAudit bypass executor (P2, fixed)
+R9: executor client pooling (P2, fixed)
+R7: Output package (P3, remaining)
+R10: Unexport mutators (P3, fixed)
+
+KEY INSIGHT: Splitting predicate.go eliminated ALL merge conflicts in
+subsequent agent rounds. Architecture decisions directly control
+multi-agent throughput.
