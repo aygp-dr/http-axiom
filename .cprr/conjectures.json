@@ -1,0 +1,97 @@
+{
+  "conjectures": [
+    {
+      "id": 1,
+      "title": "CSP presence-only is insufficient",
+      "hypothesis": "A CSP of 'default-src *' or 'unsafe-inline unsafe-eval' provides zero XSS protection yet passes current check. Parsing policy directives will catch \u003e80% of weak CSPs against haxgoat.",
+      "status": "open",
+      "tags": [
+        "headers",
+        "csp",
+        "false-negative"
+      ],
+      "created_at": "2026-03-25T12:07:13.564801-04:00",
+      "updated_at": "2026-03-25T12:07:13.564801-04:00"
+    },
+    {
+      "id": 2,
+      "title": "HSTS max-age=0 is a security regression",
+      "hypothesis": "max-age=0 disables HSTS per RFC 6797. Parsing the numeric value and failing on \u003c31536000 will catch all HSTS downgrade misconfigurations.",
+      "status": "open",
+      "tags": [
+        "headers",
+        "hsts",
+        "rfc6797"
+      ],
+      "created_at": "2026-03-25T12:07:13.566963-04:00",
+      "updated_at": "2026-03-25T12:07:13.566963-04:00"
+    },
+    {
+      "id": 3,
+      "title": "CORS origin reflection is more dangerous than wildcard",
+      "hypothesis": "Sending Origin: evil.example.com and checking if reflected in ACAO will detect the most critical CORS misconfiguration that wildcard-only check misses.",
+      "status": "open",
+      "tags": [
+        "cross-origin",
+        "cors",
+        "false-negative"
+      ],
+      "created_at": "2026-03-25T12:07:13.568931-04:00",
+      "updated_at": "2026-03-25T12:07:13.568931-04:00"
+    },
+    {
+      "id": 4,
+      "title": "Idempotency requires state comparison not status codes",
+      "hypothesis": "RFC 9110 defines idempotency as same server-side effect, not same response. A GET-after-PUT comparison will have fewer false positives than status code comparison.",
+      "status": "open",
+      "tags": [
+        "methods",
+        "idempotency",
+        "rfc9110"
+      ],
+      "created_at": "2026-03-25T12:07:13.570925-04:00",
+      "updated_at": "2026-03-25T12:07:13.570926-04:00"
+    },
+    {
+      "id": 5,
+      "title": "Relevance matrix eliminates nonsense mutation-predicate pairs",
+      "hypothesis": "Routing mutations to semantically relevant predicate groups via a static matrix will reduce test count by \u003e60% while maintaining full coverage.",
+      "status": "open",
+      "tags": [
+        "architecture",
+        "relevance-matrix"
+      ],
+      "created_at": "2026-03-25T12:07:13.572929-04:00",
+      "updated_at": "2026-03-25T12:07:13.572929-04:00"
+    },
+    {
+      "id": 6,
+      "title": "Multi-request predicate signature enables 11 stub predicates",
+      "hypothesis": "Adding MultiPredicate func(client, target) Result to NamedPred unblocks idempotency, safety, csrf, 304, replay, toctou, workflow-skip, retries, cors-reflection, jsonp, rate-limit without changing existing single-response predicates.",
+      "status": "open",
+      "tags": [
+        "architecture",
+        "predicate-signature"
+      ],
+      "created_at": "2026-03-25T12:07:13.574909-04:00",
+      "updated_at": "2026-03-25T12:07:13.574909-04:00"
+    },
+    {
+      "id": 7,
+      "title": "SameSite=None without Secure is a browser-rejected cookie",
+      "hypothesis": "Parsing SameSite attribute value and checking for Secure flag co-presence will catch the silent cookie rejection that current substring check misses.",
+      "status": "open",
+      "tags": [
+        "headers",
+        "samesite",
+        "false-negative"
+      ],
+      "created_at": "2026-03-25T12:07:13.576836-04:00",
+      "updated_at": "2026-03-25T12:07:13.576836-04:00"
+    }
+  ],
+  "next_id": 8,
+  "config": {
+    "local": true
+  }
+}

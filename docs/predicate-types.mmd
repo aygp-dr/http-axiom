@@ -1,0 +1,67 @@
+flowchart TB
+    subgraph sig["Predicate Signatures"]
+        direction LR
+        S1["<b>SingleResponse</b><br/><i>func(resp) Result</i><br/>stateless, one HEAD/GET"]
+        S2["<b>RequestResponse</b><br/><i>func(req, resp) Result</i><br/>needs request context"]
+        S3["<b>MultiRequest</b><br/><i>func(client, target) Result</i><br/>sends its own requests"]
+    end
+
+    subgraph single["Single-Response Predicates (7 implemented)"]
+        direction TB
+        H1["✅ csp"]
+        H2["✅ hsts"]
+        H3["✅ samesite"]
+        H4["✅ corp"]
+        CO1["✅ cors"]
+        CO2["✅ redirect"]
+        CA1["✅ etag · no-store · vary"]
+    end
+
+    subgraph reqresp["Request+Response Predicates (2 needed)"]
+        direction TB
+        RR1["⬜ cors-reflection<br/><i>sent Origin: evil.com<br/>check if reflected</i>"]
+        RR2["⬜ jsonp<br/><i>sent ?callback=x<br/>check if executed</i>"]
+    end
+
+    subgraph multi["Multi-Request Predicates (9 needed)"]
+        direction TB
+        MR1["⬜ idempotency<br/><i>PUT×2, compare state</i>"]
+        MR2["⬜ safety<br/><i>GET, read state, GET again</i>"]
+        MR3["⬜ retries<br/><i>POST×3, check dedup</i>"]
+        MR4["⬜ csrf<br/><i>GET token, POST without it</i>"]
+        MR5["⬜ 304<br/><i>GET etag, GET If-None-Match</i>"]
+        MR6["⬜ replay<br/><i>POST×2, both succeed?</i>"]
+        MR7["⬜ workflow-skip<br/><i>skip to step3 directly</i>"]
+        MR8["⬜ toctou<br/><i>concurrent POST×N</i>"]
+        MR9["⬜ rate-limit<br/><i>POST×N fast, expect 429</i>"]
+    end
+
+    S1 --> single
+    S2 --> reqresp
+    S3 --> multi
+
+    style sig fill:#f5f5f5,stroke:#999,color:#333
+    style S1 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style S2 fill:#fef3e2,stroke:#b87a2a,color:#7a4f0f
+    style S3 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style single fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style H1 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style H2 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style H3 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style H4 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style CO1 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style CO2 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style CA1 fill:#e1f5ee,stroke:#0f6e56,color:#085041
+    style reqresp fill:#fef3e2,stroke:#b87a2a,color:#7a4f0f
+    style RR1 fill:#fef3e2,stroke:#b87a2a,color:#7a4f0f
+    style RR2 fill:#fef3e2,stroke:#b87a2a,color:#7a4f0f
+    style multi fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR1 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR2 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR3 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR4 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR5 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR6 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR7 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR8 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
+    style MR9 fill:#fde8e8,stroke:#b82a2a,color:#7a0f0f
