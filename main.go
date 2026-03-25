@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aygp-dr/http-axiom/internal/executor"
 	"github.com/aygp-dr/http-axiom/internal/generator"
 	"github.com/aygp-dr/http-axiom/internal/mutation"
-	"github.com/aygp-dr/http-axiom/internal/request"
 	"github.com/aygp-dr/http-axiom/internal/oracle"
 	"github.com/aygp-dr/http-axiom/internal/predicate"
+	"github.com/aygp-dr/http-axiom/internal/request"
 )
 
 // Build-time variables (set via ldflags).
@@ -383,8 +384,204 @@ Flags:
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "hax check: not yet implemented\n")
-	os.Exit(1)
+	// Parse flags.
+	url := targetURL
+	groupName := ""
+	runAll := false
+	dryRun := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-t", "--target":
+			if i+1 < len(args) {
+				url = args[i+1]
+				i++
+			}
+		case "-g", "--group":
+			if i+1 < len(args) {
+				groupName = args[i+1]
+				i++
+			}
+		case "--all":
+			runAll = true
+		case "-n", "--dry-run":
+			dryRun = true
+		default:
+			// Positional argument: treat as group name if not a flag.
+			if !strings.HasPrefix(args[i], "-") && groupName == "" {
+				groupName = args[i]
+			}
+		}
+	}
+
+	if url == "" {
+		fmt.Fprintf(os.Stderr, "error: target URL required\n")
+		fmt.Fprintf(os.Stderr, "Usage: hax check <group> -t <url>\n")
+		os.Exit(1)
+	}
+
+	// Resolve which groups to check.
+	var groups []predicate.Group
+	if runAll {
+		groups = predicate.AllGroups()
+	} else if groupName != "" {
+		g, ok := predicate.ByName(groupName)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "error: unknown predicate group %q\n", groupName)
+			fmt.Fprintf(os.Stderr, "Available: %s\n", strings.Join(predicate.GroupNames(), ", "))
+			os.Exit(1)
+		}
+		groups = []predicate.Group{g}
+	} else {
+		fmt.Fprintf(os.Stderr, "error: specify a group name or --all\n")
+		fmt.Fprintf(os.Stderr, "Usage: hax check <group> -t <url>\n")
+		fmt.Fprintf(os.Stderr, "       hax check --all -t <url>\n")
+		os.Exit(1)
+	}
+
+	// Dry-run: list what would be checked without executing.
+	if dryRun {
+		if jsonOutput {
+			type dryPred struct {
+				Group string `json:"group"`
+				Name  string `json:"name"`
+				Type  string `json:"type"`
+			}
+			var out []dryPred
+			for _, g := range groups {
+				for _, p := range g.Predicates {
+					typeName := "universal"
+					switch p.Type {
+					case predicate.TypeRelational:
+						typeName = "relational"
+					case predicate.TypeSequential:
+						typeName = "sequential"
+					}
+					out = append(out, dryPred{Group: g.Name, Name: p.Name, Type: typeName})
+				}
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			enc.Encode(out)
+			return
+		}
+		fmt.Printf("Dry run: %s\n\n", url)
+		for _, g := range groups {
+			for _, p := range g.Predicates {
+				typeName := "universal"
+				switch p.Type {
+				case predicate.TypeRelational:
+					typeName = "relational"
+				case predicate.TypeSequential:
+					typeName = "sequential"
+				}
+				fmt.Printf("  %-14s %-24s [%s]\n", g.Name, p.Name, typeName)
+			}
+		}
+		return
+	}
+
+	verbose("checking %d group(s) against %s", len(groups), url)
+
+	// Set up executor and HTTP client.
+	execCfg := executor.Config{
+		BaseURL: url,
+		Timeout: 10 * time.Second,
+	}
+	client := &http.Client{Timeout: execCfg.Timeout}
+
+	var allResults []predicate.Result
+
+	for _, group := range groups {
+		verbose("running group: %s (%d predicates)", group.Name, len(group.Predicates))
+
+		// Determine which predicate types this group contains.
+		hasUniversal := false
+		hasRelational := false
+		hasSequential := false
+		for _, p := range group.Predicates {
+			switch p.Type {
+			case predicate.TypeUniversal:
+				hasUniversal = true
+			case predicate.TypeRelational:
+				hasRelational = true
+			case predicate.TypeSequential:
+				hasSequential = true
+			}
+		}
+
+		// Type 1 (Universal): send a GET, run single-response predicates.
+		if hasUniversal {
+			req := request.Request{
+				Method: "GET",
+				Path:   "/",
+			}
+			result := executor.Execute(execCfg, req)
+			if result.Err != nil {
+				fmt.Fprintf(os.Stderr, "error: request to %s failed: %v\n", url, result.Err)
+				os.Exit(1)
+			}
+			defer result.Response.Body.Close()
+			io.Copy(io.Discard, result.Response.Body)
+			allResults = append(allResults, predicate.Run(group, result.Response)...)
+		}
+
+		// Type 2 (Relational): send a GET with mutation-injected headers.
+		if hasRelational {
+			httpReq, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: cannot build request for %s: %v\n", url, err)
+				os.Exit(1)
+			}
+			httpReq.Header.Set("Origin", "https://evil.example.com")
+			httpResp, err := client.Do(httpReq)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: relational request to %s failed: %v\n", url, err)
+				os.Exit(1)
+			}
+			defer httpResp.Body.Close()
+			io.Copy(io.Discard, httpResp.Body)
+			allResults = append(allResults, predicate.RunWithRequest(group, httpReq, httpResp)...)
+		}
+
+		// Type 3 (Sequential): predicates send their own requests.
+		if hasSequential {
+			allResults = append(allResults, predicate.RunMulti(group, client, url)...)
+		}
+	}
+
+	// Let the oracle judge the results.
+	verdict := oracle.Judge(url, allResults)
+
+	// Output.
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(verdict)
+		return
+	}
+
+	// Table output.
+	fmt.Printf("Check: %s\n\n", url)
+	for _, r := range verdict.Results {
+		marker := "?"
+		switch r.Status {
+		case "pass":
+			marker = "OK"
+		case "fail":
+			marker = "FAIL"
+		case "warn":
+			marker = "WARN"
+		case "skip":
+			marker = "SKIP"
+		}
+		fmt.Printf("  [%-4s] %-14s %-24s %s\n", marker, r.Group, r.Name, r.Detail)
+	}
+	fmt.Printf("\nSummary: %d pass, %d fail, %d warn, %d skip\n",
+		verdict.Passed, verdict.Failed, verdict.Warned, verdict.Skipped)
+	if verdict.Status == "fail" {
+		os.Exit(1)
+	}
 }
 
 // cmdRun executes the full pipeline: generate → mutate → check → oracle.
