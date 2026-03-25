@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aygp-dr/http-axiom/internal/generator"
+	"github.com/aygp-dr/http-axiom/internal/mutation"
 	"github.com/aygp-dr/http-axiom/internal/oracle"
 	"github.com/aygp-dr/http-axiom/internal/predicate"
 )
@@ -251,8 +252,108 @@ Flags:
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "hax mutate: not yet implemented\n")
-	os.Exit(1)
+	// Parse flags.
+	operatorList := ""
+	inputFile := ""
+	useStdin := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-o", "--operators":
+			if i+1 < len(args) {
+				operatorList = args[i+1]
+				i++
+			}
+		case "-i", "--input":
+			if i+1 < len(args) {
+				inputFile = args[i+1]
+				i++
+			}
+		case "--stdin":
+			useStdin = true
+		}
+	}
+
+	// Determine operators to apply.
+	var operators []string
+	if operatorList != "" {
+		operators = strings.Split(operatorList, ",")
+	} else {
+		operators = mutation.AllOperators()
+	}
+
+	// Validate operator names.
+	for _, op := range operators {
+		if _, ok := mutation.Get(op); !ok {
+			fmt.Fprintf(os.Stderr, "error: unknown mutation operator %q\n", op)
+			fmt.Fprintf(os.Stderr, "Available: %s\n", strings.Join(mutation.AllOperators(), ", "))
+			os.Exit(1)
+		}
+	}
+
+	// Determine input source.
+	var reader io.Reader
+	if inputFile != "" {
+		f, err := os.Open(inputFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot open input file: %v\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		reader = f
+	} else {
+		// Default to stdin (explicit --stdin or implicit).
+		_ = useStdin
+		reader = os.Stdin
+	}
+
+	// Read and parse JSON input.
+	var requests []generator.Request
+	dec := json.NewDecoder(reader)
+	if err := dec.Decode(&requests); err != nil {
+		fmt.Fprintf(os.Stderr, "error: invalid JSON input: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(requests) == 0 {
+		fmt.Fprintf(os.Stderr, "error: no requests in input\n")
+		os.Exit(1)
+	}
+
+	verbose("mutating %d requests with operators: %s", len(requests), strings.Join(operators, ", "))
+
+	// Apply mutations to each request, producing one mutated request per operator per input.
+	var mutated []generator.Request
+	for _, req := range requests {
+		for _, op := range operators {
+			m := mutation.Apply(req, []string{op})
+			mutated = append(mutated, m)
+		}
+	}
+
+	// Output.
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(mutated)
+		return
+	}
+
+	// Table output: OPERATOR  METHOD  PATH  HEADERS  ORIGIN
+	fmt.Printf("%-20s %-10s %-30s %-8s %s\n", "OPERATOR", "METHOD", "PATH", "HEADERS", "ORIGIN")
+	opIdx := 0
+	for range requests {
+		for _, op := range operators {
+			r := mutated[opIdx]
+			opIdx++
+			path := r.Path
+			if r.BaseURL != "" {
+				path = r.BaseURL + r.Path
+			}
+			hdrCount := fmt.Sprintf("%d", len(r.Headers))
+			fmt.Printf("%-20s %-10s %-30s %-8s %s\n", op, r.Method, path, hdrCount, r.Origin)
+		}
+	}
 }
 
 // cmdCheck runs predicate checks against a target.
