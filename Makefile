@@ -169,24 +169,46 @@ model-architecture.svg: model-architecture.mmd
 	@echo "regenerated $@ from $<"
 
 # --------------------------------------------------------------------------
-# Images (ollama local generation)
+# Images (ollama local generation + imagemagick post-processing)
 # --------------------------------------------------------------------------
+#
+# Workflow:
+#   1. make images            — generate square (1024x1024) from ollama
+#   2. make images-sizes      — crop/resize to standard sizes via imagemagick
+#   3. Pick the best and link into README.org
+#
+# Models output square images regardless of prompt. All non-square
+# formats are derived via imagemagick crop/resize from the square source.
 
 OLLAMA_MODEL ?= x/flux2-klein:4b
-BANNER_SIZE  := 1024x300
+IMGOUT       := images/output
 
-images: ## Generate all project images via ollama
+images: ## Generate all project images via ollama (square 1024x1024)
 	python3 images/generate.py --model $(OLLAMA_MODEL)
 
-images-banner: images ## Create banner from hero image (1024x300)
-	@if [ -f images/output/01-pipeline-hero_*.png ]; then \
-		convert $$(ls images/output/01-pipeline-hero_*.png | head -1) \
-			-resize $(BANNER_SIZE)^ -gravity center -extent $(BANNER_SIZE) \
-			images/output/01-pipeline-hero_banner.png; \
-		echo "banner: images/output/01-pipeline-hero_banner.png"; \
-	else \
-		echo "run 'make images' first"; exit 1; \
-	fi
+images-sizes: ## Crop/resize generated images to standard sizes (requires imagemagick)
+	@command -v convert >/dev/null || { echo "imagemagick required: brew install imagemagick"; exit 1; }
+	@for src in $(IMGOUT)/01-pipeline-hero_*.png; do \
+		[ -f "$$src" ] || continue; \
+		base=$$(basename "$$src" .png); \
+		echo "=== $$base ==="; \
+		convert "$$src" -resize 1024x300^ -gravity center -extent 1024x300 \
+			"$(IMGOUT)/$${base}_banner.png" && echo "  banner:    1024x300"; \
+		convert "$$src" -resize 1200x630^ -gravity center -extent 1200x630 \
+			"$(IMGOUT)/$${base}_og.png" && echo "  og:image:  1200x630"; \
+		convert "$$src" -resize 800x418^ -gravity center -extent 800x418 \
+			"$(IMGOUT)/$${base}_twitter.png" && echo "  twitter:   800x418"; \
+		convert "$$src" -resize 256x256 \
+			"$(IMGOUT)/$${base}_thumb.png" && echo "  thumb:     256x256"; \
+	done
+	@for src in $(IMGOUT)/05-logo-icon_*.png; do \
+		[ -f "$$src" ] || continue; \
+		base=$$(basename "$$src" .png); \
+		convert "$$src" -resize 64x64 "$(IMGOUT)/$${base}_favicon.png" && echo "  favicon: 64x64"; \
+		convert "$$src" -resize 180x180 "$(IMGOUT)/$${base}_apple-touch.png" && echo "  apple:   180x180"; \
+	done
+
+images-all: images images-sizes ## Generate + resize all images
 
 # --------------------------------------------------------------------------
 # Utility
