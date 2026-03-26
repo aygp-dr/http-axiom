@@ -546,9 +546,10 @@ Flags:
 				fmt.Fprintf(os.Stderr, "error: request to %s failed: %v\n", url, result.Err)
 				os.Exit(1)
 			}
-			defer result.Response.Body.Close()
+			groupResults := predicate.Run(group, result.Response)
 			io.Copy(io.Discard, result.Response.Body)
-			allResults = append(allResults, predicate.Run(group, result.Response)...)
+			result.Response.Body.Close()
+			allResults = append(allResults, groupResults...)
 		}
 
 		// Type 2 (Relational): send a GET with mutation-injected headers.
@@ -564,9 +565,10 @@ Flags:
 				fmt.Fprintf(os.Stderr, "error: relational request to %s failed: %v\n", url, err)
 				os.Exit(1)
 			}
-			defer httpResp.Body.Close()
+			groupResults := predicate.RunWithRequest(group, httpReq, httpResp)
 			io.Copy(io.Discard, httpResp.Body)
-			allResults = append(allResults, predicate.RunWithRequest(group, httpReq, httpResp)...)
+			httpResp.Body.Close()
+			allResults = append(allResults, groupResults...)
 		}
 
 		// Type 3 (Sequential): predicates send their own requests.
