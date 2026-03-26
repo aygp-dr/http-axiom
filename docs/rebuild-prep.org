@@ -180,3 +180,68 @@ These files are correct and need no changes in a rebuild:
 - =docs/session-meta-2026-03-25.org= — lessons learned
 - =model-architecture.mmd= — pipeline diagram (mermaid source)
 - =.cprr/conjectures.json= — hypothesis history
+
+* Oracle Output Gap (confirmed 2026-03-25)
+
+Tested =hax run -t http://localhost:9999 -n 3= against haxgoat.
+
+** What the oracle produces today
+
+- 504 total results, 144 failures
+- 6 unique failure types repeated across 24 mutation variants
+- 84:1 noise ratio (results per unique finding)
+- Detail strings like "Content-Security-Policy header missing"
+- No RFC citation (except HSTS which has one)
+- No remediation
+- No severity
+- No deduplication
+- No shrink result attached to failures
+- No "which mutation exposed this"
+
+** What the oracle should produce
+
+#+begin_src json
+{
+  "findings": [
+    {
+      "id": "headers/csp",
+      "severity": "high",
+      "status": "fail",
+      "detail": "Content-Security-Policy header missing",
+      "rfc": "W3C CSP Level 3",
+      "occurrences": 24,
+      "minimal_request": {"method": "GET", "path": "/", "headers": {}},
+      "remediation": {
+        "header": "Content-Security-Policy",
+        "value": "default-src 'self'",
+        "frameworks": {
+          "express": "app.use(helmet.contentSecurityPolicy({directives: {defaultSrc: [\"'self'\"]}})))",
+          "go": "w.Header().Set(\"Content-Security-Policy\", \"default-src 'self'\")"
+        }
+      }
+    }
+  ],
+  "summary": {
+    "unique_findings": 6,
+    "total_checks": 504,
+    "deduplicated": true
+  }
+}
+#+end_src
+
+** What this means for the rebuild
+
+The oracle (=internal/oracle/oracle.go=) needs to evolve from a counter
+to a synthesizer:
+
+1. *Deduplicate*: group results by predicate, count occurrences
+2. *Cite*: attach RFC/spec reference per predicate (static data from predicate registration)
+3. *Shrink*: for each unique failure, call =oracle.Shrink()= to find minimal request
+4. *Remediate*: attach fix snippets per framework (static data, the =hax manifest= source)
+5. *Rank*: severity per predicate (critical/high/medium/low/info)
+
+This is the P1 work: =hax manifest= + =hax remediate= + oracle dedup.
+The AI agent reviewer's feedback was: "JSON output is necessary but not
+sufficient. Structured remediation with framework-specific snippets is needed."
+The DevOps reviewer's feedback was: "Every CI run produces the same known
+failures." Both point to the same gap: the oracle counts but doesn't think.
