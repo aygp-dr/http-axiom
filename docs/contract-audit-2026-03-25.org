@@ -1,0 +1,113 @@
+#+TITLE: Contract and Invariant Audit: 2026-03-25
+#+DATE: 2026-03-25
+
+* Summary
+
+Audit of all boundary contracts between 9 internal packages.
+4 violations, 6 warnings, 19 conformant checks.
+
+* Critical Violations
+
+** V1: 7 TypeSequential predicates have Fn stub, not MultiFn
+
+Predicates: retries, csrf, jsonp, 304, workflow-skip, toctou, replay.
+
+They declare ~Type: TypeSequential~ but wire ~Fn:~ (a stub returning
+"skip") instead of ~MultiFn:~. This means:
+- ~Run()~ executes them (returning skip) — wrong runner for the type
+- ~RunMulti()~ skips them (MultiFn == nil) — the correct runner can't run them
+- Type metadata is misleading for any code that trusts it
+
+Fix: Remove ~Fn~ from these 7 predicates. They should only have ~MultiFn~
+set (currently nil until implemented). ~Run()~ will then skip them
+correctly via the ~p.MultiFn != nil && p.Fn == nil~ guard.
+
+** V2: Response body leaks in cmdRun for repeat mutations
+
+~repeatNMutator~ sets Repeat=3, ~repeatConcurrentMutator~ sets Repeat=5.
+~executor.Execute~ creates that many responses in ~Result.Responses~.
+~cmdRun~ only closes ~result.Response~ (index 0). Indices 1..N leak.
+
+For a run with 50 base requests × 8 operators = 400 variants, the
+repeat-N and repeat-concurrent operators produce ~100 variants with
+Repeat > 1, leaking ~200-400 response bodies (TCP connections + FDs).
+
+Fix: After closing ~result.Response~, iterate ~result.Responses[1:]~
+and close each.
+
+** V3: cmdDoctor leaks response body
+
+~client.Head("https://httpbin.org/get")~ response never closed.
+Minor (single connection in diagnostic command).
+
+Fix: Add ~defer resp.Body.Close()~ after error check.
+
+** V4: Relevance matrix not used in cmdRun
+
+~internal/relevance~ defines the mutation → predicate group routing
+matrix. ~cmdRun~ does uniform fan-out: every mutation checked against
+every predicate group. This is the "280 nonsensical combinations"
+the formal model warns against.
+
+The relevance package is dead code from cmdRun's perspective.
+
+Fix: In cmdRun, replace the ~for _, group := range groups~ loop with
+relevance-driven routing: ~relevance.ForMutation(op)~ to get the
+target groups for each mutation operator.
+
+* Warnings
+
+- 7 TypeSequential stubs execute in ~Run()~ (returning skip) — safe but misleading
+- Response body closure contract is implicit (no doc comment on Result)
+- Empty ~BaseURL~ produces bad URL error (no early-fail with clear message)
+- Body closed before predicates in cmdRun (safe because predicates read headers only)
+- ~Responses[1:]~ not closed in cmdAudit/cmdCheck (not triggered because no repeat mutations)
+
+* Conformant
+
+- Mutation immutability: all mutators deep-copy Headers ✓
+- Group name constants match constructors ✓
+- Relevance matrix references valid group names ✓
+- cmdList derives from AllGroups() ✓
+- Pipeline type flow: request.Request at every boundary ✓
+- cmdRun calls all three runners ✓
+- Zero external dependencies ✓
+- Three property types match spec ✓
+- ExecuteBatch shares client ✓
+
+* Performance Benchmarks
+
+Hardware: Apple M4, 16 GB RAM. Binary: 8.7 MB (stripped, stdlib only).
+
+| Command | Args | Requests | Results | Time |
+|---------+------+----------+---------+------|
+| audit | /secure | 3 (GET + Origin + Multi) | 25 | 0.38s |
+| audit | / (cold) | 3 | 25 | 0.01s |
+| check --all | / | ~6 | 21 | 0.01s |
+| run -n 5 | / | 5×8=40 variants | 840 | 0.06s |
+| run -n 20 | / | 20×8=160 variants | 3,360 | 0.16s |
+| run -n 50 | / | 50×8=400 variants | 8,400 | 0.40s |
+| generate -n 1000 | (no network) | — | — | 0.006s |
+| generate+mutate pipe | 100 reqs (no network) | — | — | 0.005s |
+
+Observations:
+- ~hax run -n 50~ produces 8,400 predicate results in 0.4 seconds
+- Throughput: ~21,000 predicate checks/second against localhost
+- Network-bound: CPU time is negligible (<0.2s); wall time is HTTP round-trips
+- Generation+mutation pipeline (no network): 100 requests in 5ms
+- Extrapolation: ~hax run -n 500~ against localhost should take ~4s
+- Against a remote target with 50ms latency: ~hax run -n 50~ would take ~20s
+  (400 sequential requests × 50ms each)
+
+* For the Rebuild
+
+Key contracts to preserve in any rewrite:
+
+1. ~request.Request~ is the universal domain type — leaf package, no deps
+2. Mutators must deep-copy ~Headers~ map before modification
+3. Three predicate types: Universal (Fn), Relational (ReqFn), Sequential (MultiFn)
+4. ~Run/RunWithRequest/RunMulti~ dispatchers must respect Type field
+5. Response bodies are caller-close — must close all Responses[], not just [0]
+6. Relevance matrix should drive cmdRun routing (currently violated)
+7. ~--json~ must work in any flag position (via stripGlobalFlags or flag.FlagSet)
+8. Commands that detect issues must exit non-zero
