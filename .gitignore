@@ -11,3 +11,6 @@ model-architecture-original.svg
 *.db
 .claude/worktrees/
 .githooks/
+
+# Generated images (regenerate with: make images)
+images/output/

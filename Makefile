@@ -169,6 +169,26 @@ model-architecture.svg: model-architecture.mmd
 	@echo "regenerated $@ from $<"
 
 # --------------------------------------------------------------------------
+# Images (ollama local generation)
+# --------------------------------------------------------------------------
+
+OLLAMA_MODEL ?= x/flux2-klein:4b
+BANNER_SIZE  := 1024x300
+
+images: ## Generate all project images via ollama
+	python3 images/generate.py --model $(OLLAMA_MODEL)
+
+images-banner: images ## Create banner from hero image (1024x300)
+	@if [ -f images/output/01-pipeline-hero_*.png ]; then \
+		convert $$(ls images/output/01-pipeline-hero_*.png | head -1) \
+			-resize $(BANNER_SIZE)^ -gravity center -extent $(BANNER_SIZE) \
+			images/output/01-pipeline-hero_banner.png; \
+		echo "banner: images/output/01-pipeline-hero_banner.png"; \
+	else \
+		echo "run 'make images' first"; exit 1; \
+	fi
+
+# --------------------------------------------------------------------------
 # Utility
 # --------------------------------------------------------------------------
 
