@@ -1149,24 +1149,239 @@ func cmdShrink(args []string) {
 	if len(args) > 0 && isHelpFlag(args[0]) {
 		fmt.Print(`Usage: hax shrink [flags]
 
-Minimize a failing test case.
+Minimize a failing test case using lattice-based shrinking.
 
-Uses Hegel-based shrinking to find the smallest request
-that still triggers the failure.
+Progressively simplifies a failing request to find the minimal
+reproduction: remove headers, simplify auth/origin, reduce method
+and repeat count.
 
 Flags:
-  -i, --input FILE      Failing test case (JSON)
-  --stdin               Read from stdin
+  -i, --input FILE      Failing test case (JSON request)
+  --stdin               Read from stdin (default if no --input)
   --max-shrinks N       Maximum shrink attempts (default: 50)
+  -t, --target URL      Target URL (required)
+  --predicate NAME      Predicate name to check
+  --group NAME          Predicate group to check
+  --json                Output as JSON
   -h, --help            Show this help
+
+Examples:
+  echo '{"method":"POST","path":"/","headers":{"X-A":"1","X-B":"2"}}' | hax shrink -t http://localhost:9999 --group headers
+  hax shrink -i failing-request.json -t http://localhost:9999 --predicate csp
 `)
 		return
 	}
 
 	args = stripGlobalFlags(args)
 
-	fmt.Fprintf(os.Stderr, "hax shrink: not yet implemented\n")
-	os.Exit(1)
+	// Parse flags.
+	url := targetURL
+	inputFile := ""
+	useStdin := false
+	maxShrinks := 50
+	predicateName := ""
+	groupName := ""
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-i", "--input":
+			if i+1 < len(args) {
+				inputFile = args[i+1]
+				i++
+			}
+		case "--stdin":
+			useStdin = true
+		case "--max-shrinks":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &maxShrinks)
+				i++
+			}
+		case "-t", "--target":
+			if i+1 < len(args) {
+				url = args[i+1]
+				i++
+			}
+		case "--predicate":
+			if i+1 < len(args) {
+				predicateName = args[i+1]
+				i++
+			}
+		case "--group":
+			if i+1 < len(args) {
+				groupName = args[i+1]
+				i++
+			}
+		}
+	}
+
+	if url == "" {
+		fmt.Fprintf(os.Stderr, "error: target URL required (-t <url>)\n")
+		os.Exit(1)
+	}
+
+	// Read the failing request from stdin or file.
+	var inputData []byte
+	var readErr error
+
+	if inputFile != "" {
+		inputData, readErr = os.ReadFile(inputFile)
+	} else {
+		// Default to stdin.
+		useStdin = true
+		_ = useStdin
+		inputData, readErr = io.ReadAll(os.Stdin)
+	}
+	if readErr != nil {
+		fmt.Fprintf(os.Stderr, "error reading input: %v\n", readErr)
+		os.Exit(1)
+	}
+
+	var req request.Request
+	if err := json.Unmarshal(inputData, &req); err != nil {
+		fmt.Fprintf(os.Stderr, "error parsing request JSON: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Resolve which predicates to use.
+	var groups []predicate.Group
+	if groupName != "" {
+		g, ok := predicate.ByName(groupName)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "error: unknown predicate group %q\n", groupName)
+			fmt.Fprintf(os.Stderr, "Available: %s\n", strings.Join(predicate.GroupNames(), ", "))
+			os.Exit(1)
+		}
+		groups = []predicate.Group{g}
+	} else if predicateName != "" {
+		// Find the predicate by name across all groups.
+		for _, g := range predicate.AllGroups() {
+			for _, p := range g.Predicates {
+				if p.Name == predicateName {
+					groups = []predicate.Group{{Name: g.Name, Predicates: []predicate.NamedPred{p}}}
+					break
+				}
+			}
+			if len(groups) > 0 {
+				break
+			}
+		}
+		if len(groups) == 0 {
+			fmt.Fprintf(os.Stderr, "error: unknown predicate %q\n", predicateName)
+			os.Exit(1)
+		}
+	} else {
+		// Default: run all groups.
+		groups = predicate.AllGroups()
+	}
+
+	// Set up executor config.
+	execCfg := executor.Config{
+		BaseURL: url,
+		Timeout: 10 * time.Second,
+	}
+	client := &http.Client{Timeout: execCfg.Timeout}
+	execCfg.Client = client
+
+	// Build the CheckFunc: execute the request and run predicates.
+	checkFn := func(r request.Request) (predicate.Result, error) {
+		r.BaseURL = url
+		result := executor.Execute(execCfg, r)
+		if result.Err != nil {
+			return predicate.Result{}, result.Err
+		}
+		if result.Response == nil {
+			return predicate.Result{}, fmt.Errorf("no response")
+		}
+
+		// Run predicates and return the first failure.
+		for _, group := range groups {
+			for _, p := range group.Predicates {
+				var pr predicate.Result
+				switch p.Type {
+				case predicate.TypeUniversal:
+					if p.Fn != nil {
+						pr = p.Fn(result.Response)
+					}
+				case predicate.TypeRelational:
+					if p.ReqFn != nil {
+						fullURL := strings.TrimRight(url, "/") + r.Path
+						httpReq, reqErr := http.NewRequest(r.Method, fullURL, nil)
+						if reqErr == nil {
+							for k, v := range r.Headers {
+								httpReq.Header.Set(k, v)
+							}
+							pr = p.ReqFn(httpReq, result.Response)
+						}
+					}
+				case predicate.TypeSequential:
+					if p.MultiFn != nil {
+						pr = p.MultiFn(client, url)
+					}
+				}
+				if pr.Status == "fail" {
+					return pr, nil
+				}
+			}
+		}
+		// No failure found.
+		return predicate.Result{Status: "pass"}, nil
+	}
+
+	// Run the shrink.
+	shrinkCfg := oracle.ShrinkConfig{
+		MaxAttempts: maxShrinks,
+		Enabled:     true,
+	}
+
+	verbose("shrinking request against %s (max %d attempts)", url, maxShrinks)
+	shrinkResult := oracle.Shrink(shrinkCfg, req, checkFn)
+	verbose("shrink complete: %d steps", shrinkResult.Steps)
+
+	// Output.
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(shrinkResult)
+	} else {
+		fmt.Printf("Shrink result (%d steps):\n\n", shrinkResult.Steps)
+		if shrinkResult.Predicate != "" {
+			fmt.Printf("  Failing predicate: %s (group: %s)\n\n", shrinkResult.Predicate, shrinkResult.Group)
+		}
+		fmt.Println("  Original:")
+		printRequestSummary("    ", shrinkResult.Original)
+		fmt.Println()
+		fmt.Println("  Shrunk:")
+		printRequestSummary("    ", shrinkResult.Shrunk)
+		fmt.Println()
+		if shrinkResult.Steps == 0 {
+			fmt.Println("  (request is already minimal or does not fail)")
+		}
+	}
+}
+
+// printRequestSummary prints a human-readable summary of a request.
+func printRequestSummary(indent string, r request.Request) {
+	method := r.Method
+	if method == "" {
+		method = "GET"
+	}
+	fmt.Printf("%sMethod:  %s\n", indent, method)
+	fmt.Printf("%sPath:    %s\n", indent, r.Path)
+	if r.Auth != "" {
+		fmt.Printf("%sAuth:    %s\n", indent, r.Auth)
+	}
+	if r.Origin != "" {
+		fmt.Printf("%sOrigin:  %s\n", indent, r.Origin)
+	}
+	if r.Repeat > 1 {
+		fmt.Printf("%sRepeat:  %d\n", indent, r.Repeat)
+	}
+	if len(r.Headers) > 0 {
+		fmt.Printf("%sHeaders: (%d)\n", indent, len(r.Headers))
+		for k, v := range r.Headers {
+			fmt.Printf("%s  %s: %s\n", indent, k, v)
+		}
+	}
 }
 
 // cmdDoctor runs health checks.
