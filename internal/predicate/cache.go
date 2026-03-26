@@ -13,7 +13,7 @@ func CacheGroup() Group {
 			{Name: "etag", Fn: checkETag, Type: TypeUniversal},
 			{Name: "no-store", Fn: checkNoStore, Type: TypeUniversal},
 			{Name: "vary", Fn: checkVary, Type: TypeUniversal},
-			{Name: "304", Fn: check304, Type: TypeSequential},
+			{Name: "304", Fn: check304, Type: TypeUniversal}, // stub: will become TypeSequential+MultiFn
 		},
 	}
 }

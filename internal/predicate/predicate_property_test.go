@@ -6,21 +6,10 @@ import (
 	"pgregory.net/rapid"
 )
 
-// knownTypeConsistencyExceptions lists predicates that are declared as
-// TypeSequential but have Fn set instead of MultiFn. These are stubs
-// awaiting multi-request implementation. The test documents them so the
-// gap is visible without papering over it.
-//
-// Each entry is "group/name".
-var knownTypeConsistencyExceptions = map[string]bool{
-	"methods/retries":          true, // Fn stub, should be MultiFn
-	"cross-origin/csrf":        true, // Fn stub, should be MultiFn
-	"cross-origin/jsonp":       true, // Fn stub, should be MultiFn
-	"cache/304":                true, // Fn stub, should be MultiFn
-	"state/workflow-skip":      true, // Fn stub, should be MultiFn
-	"state/toctou":             true, // Fn stub, should be MultiFn
-	"state/replay":             true, // Fn stub, should be MultiFn
-}
+// knownTypeConsistencyExceptions lists predicates where Type tag does
+// not match the populated function field. Empty after fixing stubs to
+// declare TypeUniversal while they use Fn (not MultiFn).
+var knownTypeConsistencyExceptions = map[string]bool{}
 
 // TestProperty_ExactlyOneFunctionFieldSet verifies the structural invariant:
 // for every predicate across all groups, exactly one of Fn/ReqFn/MultiFn

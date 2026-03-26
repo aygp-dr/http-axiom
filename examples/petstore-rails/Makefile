@@ -1,5 +1,5 @@
 RUBY := /opt/homebrew/opt/ruby/bin/ruby
-GEM_BIN := /opt/homebrew/lib/ruby/gems/3.4.0/bin
+GEM_BIN := /opt/homebrew/lib/ruby/gems/4.0.0/bin
 export PATH := $(GEM_BIN):/opt/homebrew/opt/ruby/bin:$(PATH)
 
 PORT ?= 3033

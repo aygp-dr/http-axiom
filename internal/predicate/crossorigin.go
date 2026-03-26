@@ -10,10 +10,10 @@ func CrossOriginGroup() Group {
 	return Group{
 		Name: GroupCrossOrigin,
 		Predicates: []NamedPred{
-			{Name: "csrf", Fn: checkCSRF, Type: TypeSequential},
+			{Name: "csrf", Fn: checkCSRF, Type: TypeUniversal},               // stub: will become TypeSequential+MultiFn
 			{Name: "cors", Fn: checkCORS, Type: TypeUniversal},
 			{Name: "cors-reflection", ReqFn: checkCORSReflection, Type: TypeRelational},
-			{Name: "jsonp", Fn: checkJSONP, Type: TypeSequential},
+			{Name: "jsonp", Fn: checkJSONP, Type: TypeUniversal},              // stub: will become TypeSequential+MultiFn
 			{Name: "redirect", Fn: checkRedirect, Type: TypeUniversal},
 		},
 	}

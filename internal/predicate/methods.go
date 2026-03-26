@@ -14,7 +14,7 @@ func MethodGroup() Group {
 		Predicates: []NamedPred{
 			{Name: "idempotency", MultiFn: checkIdempotencyMulti, Type: TypeSequential},
 			{Name: "safety", MultiFn: checkSafetyMulti, Type: TypeSequential},
-			{Name: "retries", Fn: checkRetries, Type: TypeSequential},
+			{Name: "retries", Fn: checkRetries, Type: TypeUniversal}, // stub: will become TypeSequential+MultiFn
 		},
 	}
 }

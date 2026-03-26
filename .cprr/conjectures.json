@@ -207,7 +207,13 @@
         "TLC model check on bounded instance (4 headers, full auth/origin ladder, repeat<=5)",
         "If local-minimum witness found, document as a known limitation with concrete example"
       ],
-      "status": "open",
+      "evidence": [
+        "TLC verified 2,500 distinct states: TypeOK, ComplexityDecreases, BoundedSteps, EventuallyDone all pass",
+        "MaxAttempts is provably redundant for termination — complexity is well-founded and strictly decreasing",
+        "Local-minimum limitation documented: greedy single-axis strategy cannot find minima requiring 2+ simultaneous dimension changes",
+        "Spec: formal/ShrinkTermination.tla, config: formal/ShrinkTermination.cfg"
+      ],
+      "status": "confirmed",
       "tags": [
         "formal-methods",
         "tla+",
@@ -306,7 +312,13 @@
         "TLC counterexample showing a server that passes status-code check but fails state check (validates C-004)",
         "Bounded model: state space <= 10 values, methods = {GET, PUT, POST, DELETE}"
       ],
-      "status": "open",
+      "evidence": [
+        "TLC verified 276,965 distinct states: SafeMethodsPreserveState and IdempotentPUTConverges both hold",
+        "StatusCodeIdempotency_SHOULD_FAIL violated as expected: PUT returns 201 (create) then 200 (update) — different codes, same state",
+        "This validates C-004: hax correctly uses state comparison (response body diff) rather than status code comparison",
+        "Spec: formal/HTTPMethodSemantics.tla, configs: formal/HTTPMethodSemantics.cfg and HTTPMethodSemantics_StatusCode.cfg"
+      ],
+      "status": "confirmed",
       "tags": [
         "formal-methods",
         "tla+",
@@ -527,8 +539,124 @@
       "assigned_agent": "researcher",
       "review_gate": "Is Hegel integration research or engineering? Blocked on hegel-go."
     }
+    ,
+    {
+      "id": 30,
+      "title": "Audit needs diff/compare mode for epoch-based regression tracking",
+      "hypothesis": "Adding --baseline <file> to hax audit that loads a prior YAML result and outputs a delta (new passes, regressions, resolved failures) will eliminate manual diff of JSON output between epochs. Against petstore-rails Epoch 0→1, the diff should show 5 resolved (csp, corp, coep, coop, permissions-policy), 0 regressions, 1 persistent (hsts). Without this, epoch tracking requires external tooling or eyeball comparison of full JSON blobs.",
+      "falsification": "If teams use external diff tools (jq, vimdiff) effectively and never request built-in comparison, the feature adds complexity without adoption.",
+      "evidence": [
+        "petstore-rails Epoch 0: 7 pass, 3 fail, 3 warn. Epoch 1: 12 pass, 1 fail, 0 warn. Required manual comparison of two full JSON outputs to determine what changed."
+      ],
+      "status": "open",
+      "tags": [
+        "cli",
+        "ux",
+        "epoch",
+        "diff",
+        "change-management"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Is baseline comparison a CLI concern or should it be delegated to external tooling?"
+    },
+    {
+      "id": 31,
+      "title": "Profile-aware predicate skipping prevents false positives on known-inapplicable checks",
+      "hypothesis": "Adding --profile <file> to hax audit that reads a YAML profile (e.g. 'layers: [], notes: HSTS skipped') and suppresses predicates inapplicable to the deployment context will eliminate the persistent HSTS false positive on localhost. The profile mechanism should support skip-with-reason, so CI output shows 'hsts: skipped (profile: no HTTPS)' instead of 'hsts: fail'. Against petstore-rails local profile, this converts 1 failure to 1 annotated skip.",
+      "falsification": "If profile-based skipping masks real misconfigurations (developer sets profile to skip everything), the mechanism creates worse outcomes than false positives. Needs a safeguard like --strict that ignores profiles.",
+      "evidence": [
+        "petstore-rails hax/profiles/local.yaml already documents 'HSTS and Secure cookie axioms skipped (no HTTPS)' but hax ignores this and reports HSTS as failure on every run"
+      ],
+      "status": "open",
+      "tags": [
+        "cli",
+        "ux",
+        "profiles",
+        "false-positive",
+        "deployment-context"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Does profile-based skipping violate the property-testing philosophy (never suppress a check)?"
+    },
+    {
+      "id": 32,
+      "title": "Remediation hints in audit output close the developer feedback loop",
+      "hypothesis": "Adding a 'remediation' field to each failing/warning result with a one-liner fix and RFC section reference will reduce time-to-fix by eliminating the research step. For csp: 'Add Content-Security-Policy header (CSP L3 §2, RFC 9110 §8.1)'. For hsts: 'Add Strict-Transport-Security: max-age=31536000; includeSubDomains (RFC 6797 §6.1)'. Enabled via --remediate flag to keep default output lean. Against petstore-rails Epoch 0, all 3 failures and 3 warnings would include actionable fix text.",
+      "falsification": "If developers already know what CSP/HSTS/CORP are and find remediation text patronizing or noisy, the feature degrades UX for experienced users. The --remediate flag mitigates this but adds flag surface area.",
+      "evidence": [
+        "petstore-rails Epoch 0 failures say 'Content-Security-Policy header missing' but not how to add it. Developer must know Rails middleware patterns independently. Standard tools like bundler-audit and brakeman include fix suggestions."
+      ],
+      "status": "open",
+      "tags": [
+        "cli",
+        "ux",
+        "remediation",
+        "developer-experience",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "observer",
+      "review_gate": "Are remediation hints in scope for L1 property tester or is this L2 advisory territory?"
+    },
+    {
+      "id": 33,
+      "title": "Skip-reason taxonomy distinguishes 'not applicable' from 'not implemented'",
+      "hypothesis": "The 12 skipped predicates in audit output conflate two distinct reasons: (a) the predicate is implemented but the response doesn't trigger it (e.g. 'no cookies set' for samesite), and (b) the predicate is a stub awaiting multi-request support (e.g. 'requires stateful test'). Adding a skip_reason enum (not_applicable | not_implemented | requires_feature) and a --hide-skip flag will let users filter noise. Against petstore-rails, 4 of 12 skips are 'not_applicable' and 8 are 'not_implemented' — users should be able to distinguish these.",
+      "falsification": "If users treat all skips uniformly and never filter by reason, the taxonomy adds structural complexity with no UX benefit.",
+      "evidence": [
+        "petstore-rails audit: 12/25 predicates skipped. 'no cookies set' (legitimate skip) is visually identical to 'requires multi-request test' (hax limitation). Nearly half the output is uninformative noise for single-request audit."
+      ],
+      "status": "open",
+      "tags": [
+        "cli",
+        "ux",
+        "skip-taxonomy",
+        "output-quality",
+        "signal-to-noise"
+      ],
+      "assigned_agent": "observer",
+      "review_gate": "Does skip-reason taxonomy change the Result type contract or is it metadata-only?"
+    },
+    {
+      "id": 34,
+      "title": "Exit code semantics need --fail-on threshold for CI gate tuning",
+      "hypothesis": "hax audit exits non-zero on any failure, but CI pipelines need granular control: --fail-on=fail (default, current behavior), --fail-on=warn (exit non-zero on warn or fail), --fail-on=none (always exit 0, for advisory-only runs). Against petstore-rails Epoch 1, --fail-on=fail exits 1 (HSTS), but a team that uses profiles to skip HSTS wants exit 0. Without this, teams either ignore hax exit codes entirely or maintain wrapper scripts.",
+      "falsification": "If every team either wants strict (fail on anything) or advisory (ignore exit code), the middle ground (fail-on-warn) has no users and the flag is overengineered.",
+      "evidence": [
+        "petstore-rails Epoch 0: exit 1 (3 fails + 3 warns). Epoch 1: exit 1 (1 fail, HSTS on localhost). No way to express 'HSTS on localhost is expected, exit 0' without a wrapper script or profile skip."
+      ],
+      "status": "open",
+      "tags": [
+        "cli",
+        "ux",
+        "exit-codes",
+        "ci-integration",
+        "change-management"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Does exit code granularity belong in hax or in CI wrapper scripts?"
+    },
+    {
+      "id": 35,
+      "title": "Audit --record flag enables machine-written epoch history",
+      "hypothesis": "Adding --record <path> to hax audit that writes results in the existing hax/history/ YAML format will close the loop between running hax and tracking posture over time. Currently the YAML history file (hax/history/0.0.1.yaml) was hand-written. --record should auto-populate app_version (from --app-version flag or git), git_sha, date, profile, per-endpoint results, and failure/warning summaries. Against petstore-rails, --record hax/history/0.0.2.yaml after Epoch 1 fixes should produce a valid YAML that diffs cleanly against 0.0.1.yaml.",
+      "falsification": "If teams prefer to store hax results in their own format (JSON in CI artifacts, database, etc.) and the YAML history format has no adoption, maintaining the --record flag and YAML schema is dead weight.",
+      "evidence": [
+        "petstore-rails hax/history/0.0.1.yaml exists but was manually created. No hax command produces this format. The gap between 'run hax' and 'record results for tracking' requires custom scripting or manual transcription."
+      ],
+      "status": "open",
+      "tags": [
+        "cli",
+        "ux",
+        "recording",
+        "epoch-tracking",
+        "change-management",
+        "sdlc"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Is result recording a core CLI concern or should hax output JSON and let external tools handle persistence?"
+    }
   ],
-  "next_id": 30,
+  "next_id": 36,
   "config": {
     "local": true
   }

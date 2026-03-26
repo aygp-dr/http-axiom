@@ -1,0 +1,59 @@
+#+TITLE: Formal Specifications for hax
+#+AUTHOR: jw
+#+DATE: 2026-03-26
+
+* Overview
+
+TLA+ specifications that model and verify hax's core algorithms.
+These are not tests — they are mathematical proofs about the algorithm's
+properties, checked exhaustively by TLC model checker.
+
+* Specifications
+
+** ShrinkTermination (C-013)
+
+Models ~oracle.Shrink~ (internal/oracle/oracle.go:92-187) as a
+5-dimensional lattice descent.
+
+Properties verified (2,500 states):
+- *TypeOK*: all variables stay within bounds
+- *ComplexityDecreases*: every accepted step strictly reduces complexity
+- *BoundedSteps*: total steps ≤ initial complexity (MaxAttempts is redundant for termination)
+- *EventuallyDone*: shrinking always terminates
+
+Known limitation documented: greedy single-axis strategy can miss
+globally minimal counterexamples requiring simultaneous 2+ dimension changes.
+
+** HTTPMethodSemantics (C-017)
+
+Models HTTP method safety (RFC 9110 §9.2.1) and idempotency (RFC 9110 §9.2.2)
+as a state machine over resource state.
+
+Properties verified (276,965 states):
+- *SafeMethodsPreserveState*: GET never changes server state
+- *IdempotentPUTConverges*: repeated PUT with same payload yields same state
+
+Counterexample generated: ~StatusCodeIdempotency_SHOULD_FAIL~ produces a
+trace where PUT returns 201 (create) then 200 (update) — different status
+codes, same state effect. This validates hax's design decision (C-004) to
+compare response bodies rather than status codes in ~checkIdempotencyMulti~.
+
+* Running
+
+#+begin_src sh
+# Prerequisites
+brew install --cask tla-plus-toolbox
+TLA2TOOLS="/Applications/TLA+ Toolbox.app/Contents/Eclipse/tla2tools.jar"
+
+# Verify shrink termination
+java -XX:+UseParallelGC -cp "$TLA2TOOLS" tlc2.TLC ShrinkTermination.tla \
+  -config ShrinkTermination.cfg -workers auto
+
+# Verify HTTP method semantics
+java -XX:+UseParallelGC -cp "$TLA2TOOLS" tlc2.TLC HTTPMethodSemantics.tla \
+  -config HTTPMethodSemantics.cfg -workers auto
+
+# Generate status-code counterexample (expected violation)
+java -XX:+UseParallelGC -cp "$TLA2TOOLS" tlc2.TLC HTTPMethodSemantics.tla \
+  -config HTTPMethodSemantics_StatusCode.cfg -workers auto
+#+end_src

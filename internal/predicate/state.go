@@ -7,9 +7,9 @@ func StateGroup() Group {
 	return Group{
 		Name: GroupState,
 		Predicates: []NamedPred{
-			{Name: "workflow-skip", Fn: checkWorkflowSkip, Type: TypeSequential},
-			{Name: "toctou", Fn: checkTOCTOU, Type: TypeSequential},
-			{Name: "replay", Fn: checkReplay, Type: TypeSequential},
+			{Name: "workflow-skip", Fn: checkWorkflowSkip, Type: TypeUniversal}, // stub: will become TypeSequential+MultiFn
+			{Name: "toctou", Fn: checkTOCTOU, Type: TypeUniversal},                // stub: will become TypeSequential+MultiFn
+			{Name: "replay", Fn: checkReplay, Type: TypeUniversal},                // stub: will become TypeSequential+MultiFn
 		},
 	}
 }
