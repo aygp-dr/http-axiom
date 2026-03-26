@@ -315,12 +315,12 @@ func checkReferrerPolicy(resp *http.Response) Result {
 		return Result{GroupHeaders, "referrer-policy", "fail", "Referrer-Policy header missing"}
 	}
 	safe := map[string]bool{
-		"no-referrer":                   true,
-		"strict-origin":                 true,
+		"no-referrer":                     true,
+		"strict-origin":                   true,
 		"strict-origin-when-cross-origin": true,
-		"same-origin":                   true,
-		"origin":                        true,
-		"origin-when-cross-origin":      true,
+		"same-origin":                     true,
+		"origin":                          true,
+		"origin-when-cross-origin":        true,
 	}
 	lower := strings.ToLower(strings.TrimSpace(val))
 	if safe[lower] {

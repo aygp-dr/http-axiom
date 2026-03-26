@@ -23,11 +23,11 @@ type Config struct {
 
 // Result captures the outcome of executing a single request.Request.
 type Result struct {
-	Request   request.Request // the original request
-	Response  *http.Response    // primary response (first for repeats)
-	Responses []*http.Response  // all responses for repeat-N/concurrent
-	Duration  time.Duration     // total execution time
-	Err       error             // nil on success
+	Request   request.Request  // the original request
+	Response  *http.Response   // primary response (first for repeats)
+	Responses []*http.Response // all responses for repeat-N/concurrent
+	Duration  time.Duration    // total execution time
+	Err       error            // nil on success
 }
 
 // DefaultConfig returns a Config with sensible defaults.
