@@ -637,8 +637,285 @@ Flags:
 
 	args = stripGlobalFlags(args)
 
-	fmt.Fprintf(os.Stderr, "hax run: not yet implemented\n")
-	os.Exit(1)
+	// ---------------------------------------------------------------
+	// 1. Parse flags
+	// ---------------------------------------------------------------
+	url := targetURL
+	count := 100
+	seed := int64(0)
+	timeout := 10 * time.Second
+	concurrency := 1
+	groupList := ""
+	operatorList := ""
+	failFast := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-t", "--target":
+			if i+1 < len(args) {
+				url = args[i+1]
+				i++
+			}
+		case "-n", "--count":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &count)
+				i++
+			}
+		case "--seed":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &seed)
+				i++
+			}
+		case "--timeout":
+			if i+1 < len(args) {
+				d, err := time.ParseDuration(args[i+1])
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: invalid timeout %q: %v\n", args[i+1], err)
+					os.Exit(1)
+				}
+				timeout = d
+				i++
+			}
+		case "--concurrency":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &concurrency)
+				i++
+			}
+		case "-g", "--groups":
+			if i+1 < len(args) {
+				groupList = args[i+1]
+				i++
+			}
+		case "-o", "--operators":
+			if i+1 < len(args) {
+				operatorList = args[i+1]
+				i++
+			}
+		case "--fail-fast":
+			failFast = true
+		case "--json":
+			jsonOutput = true
+		case "-V", "--verbose":
+			verboseMode = true
+		}
+	}
+
+	if url == "" {
+		fmt.Fprintf(os.Stderr, "error: target URL required\n")
+		fmt.Fprintf(os.Stderr, "Usage: hax run -t <url>\n")
+		os.Exit(1)
+	}
+
+	// Resolve predicate groups.
+	var groups []predicate.Group
+	if groupList != "" {
+		for _, name := range strings.Split(groupList, ",") {
+			name = strings.TrimSpace(name)
+			g, ok := predicate.ByName(name)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "error: unknown predicate group %q\n", name)
+				fmt.Fprintf(os.Stderr, "Available: %s\n", strings.Join(predicate.GroupNames(), ", "))
+				os.Exit(1)
+			}
+			groups = append(groups, g)
+		}
+	} else {
+		groups = predicate.AllGroups()
+	}
+
+	// Resolve mutation operators.
+	var operators []string
+	if operatorList != "" {
+		for _, op := range strings.Split(operatorList, ",") {
+			op = strings.TrimSpace(op)
+			if _, ok := mutation.Get(op); !ok {
+				fmt.Fprintf(os.Stderr, "error: unknown mutation operator %q\n", op)
+				fmt.Fprintf(os.Stderr, "Available: %s\n", strings.Join(mutation.AllOperators(), ", "))
+				os.Exit(1)
+			}
+			operators = append(operators, op)
+		}
+	} else {
+		operators = mutation.AllOperators()
+	}
+
+	verbose("pipeline: generate(%d, seed=%d) -> mutate(%d ops) -> check(%d groups) -> oracle",
+		count, seed, len(operators), len(groups))
+	verbose("target: %s, timeout: %s, concurrency: %d, fail-fast: %v",
+		url, timeout, concurrency, failFast)
+
+	// ---------------------------------------------------------------
+	// 2. Generate
+	// ---------------------------------------------------------------
+	cfg := generator.DefaultConfig()
+	cfg.Count = count
+	cfg.Seed = seed
+	requests := generator.Generate(cfg)
+
+	verbose("generated %d base requests", len(requests))
+
+	// ---------------------------------------------------------------
+	// 3. Mutate
+	// ---------------------------------------------------------------
+	var mutated []request.Request
+	for _, req := range requests {
+		for _, op := range operators {
+			m := mutation.Apply(req, []string{op})
+			mutated = append(mutated, m)
+		}
+	}
+
+	verbose("mutated into %d request variants", len(mutated))
+
+	// ---------------------------------------------------------------
+	// 4. Execute + Check
+	// ---------------------------------------------------------------
+	execCfg := executor.Config{
+		BaseURL:     url,
+		Timeout:     timeout,
+		Concurrency: concurrency,
+	}
+	client := &http.Client{Timeout: timeout}
+
+	var allResults []predicate.Result
+	total := len(mutated)
+	stopped := false
+
+	for idx, req := range mutated {
+		if stopped {
+			break
+		}
+
+		// Execute the request.
+		result := executor.Execute(execCfg, req)
+		if result.Err != nil {
+			verbose("[%d/%d] %s %s -> ERROR: %v", idx+1, total, req.Method, req.Path, result.Err)
+			// Record as skip and continue — network errors should not halt the run.
+			allResults = append(allResults, predicate.Result{
+				Group:  "executor",
+				Name:   "request",
+				Status: "skip",
+				Detail: fmt.Sprintf("%s %s: %v", req.Method, req.Path, result.Err),
+			})
+			continue
+		}
+
+		// Drain and close the response body so connections can be reused.
+		if result.Response != nil {
+			io.Copy(io.Discard, result.Response.Body)
+			result.Response.Body.Close()
+		}
+
+		// Run each selected predicate group against the response.
+		for _, group := range groups {
+			var groupResults []predicate.Result
+
+			// Classify which predicate types this group contains.
+			hasUniversal := false
+			hasRelational := false
+			hasSequential := false
+			for _, p := range group.Predicates {
+				switch p.Type {
+				case predicate.TypeUniversal:
+					hasUniversal = true
+				case predicate.TypeRelational:
+					hasRelational = true
+				case predicate.TypeSequential:
+					hasSequential = true
+				}
+			}
+
+			// Universal predicates: run against the response we already have.
+			if hasUniversal && result.Response != nil {
+				groupResults = append(groupResults, predicate.Run(group, result.Response)...)
+			}
+
+			// Relational predicates: construct a request with evil Origin and execute.
+			if hasRelational {
+				httpReq, err := http.NewRequest("GET", url, nil)
+				if err == nil {
+					httpReq.Header.Set("Origin", "https://evil.example.com")
+					httpResp, err := client.Do(httpReq)
+					if err == nil {
+						io.Copy(io.Discard, httpResp.Body)
+						httpResp.Body.Close()
+						groupResults = append(groupResults, predicate.RunWithRequest(group, httpReq, httpResp)...)
+					}
+				}
+			}
+
+			// Sequential predicates: they manage their own requests.
+			if hasSequential {
+				groupResults = append(groupResults, predicate.RunMulti(group, client, url)...)
+			}
+
+			// Verbose progress output.
+			for _, r := range groupResults {
+				if verboseMode {
+					fmt.Fprintf(os.Stderr, "[%d/%d] %s %s -> %s: %s=%s (%s)\n",
+						idx+1, total, req.Method, req.Path,
+						r.Group, r.Name, r.Status, result.Duration)
+				}
+			}
+
+			allResults = append(allResults, groupResults...)
+
+			// Fail-fast: stop on first failure.
+			if failFast {
+				for _, r := range groupResults {
+					if r.Status == "fail" {
+						stopped = true
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// 5. Oracle
+	// ---------------------------------------------------------------
+	verdict := oracle.Judge(url, allResults)
+
+	// ---------------------------------------------------------------
+	// 6. Output
+	// ---------------------------------------------------------------
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(verdict)
+		if verdict.Status == "fail" {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Normal / verbose mode: print the verdict summary.
+	fmt.Printf("Run: %s\n\n", url)
+	for _, r := range verdict.Results {
+		marker := "?"
+		switch r.Status {
+		case "pass":
+			marker = "OK"
+		case "fail":
+			marker = "FAIL"
+		case "warn":
+			marker = "WARN"
+		case "skip":
+			marker = "SKIP"
+		}
+		fmt.Printf("  [%-4s] %-14s %-24s %s\n", marker, r.Group, r.Name, r.Detail)
+	}
+	fmt.Printf("\nSummary: %d pass, %d fail, %d warn, %d skip\n",
+		verdict.Passed, verdict.Failed, verdict.Warned, verdict.Skipped)
+
+	if stopped {
+		fmt.Println("(stopped early: --fail-fast)")
+	}
+
+	if verdict.Status == "fail" {
+		os.Exit(1)
+	}
 }
 
 // cmdList enumerates available predicates, mutations, or groups.
