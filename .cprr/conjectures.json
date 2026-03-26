@@ -168,9 +168,26 @@
       ],
       "created_at": "2026-03-25T17:55:30.725454-04:00",
       "updated_at": "2026-03-25T17:57:10.70274-04:00"
+    },
+    {
+      "id": 12,
+      "title": "Ollama image gen requires MLX on Apple Silicon for usable performance",
+      "hypothesis": "Without MLX dynamic library, x/z-image-turbo (12GB) and x/flux2-klein:4b (5.7GB) fall back to CPU and produce no output in 90s. With MLX, the reference project (qwen3-steering) generated images in ~65s.",
+      "evidence": [
+        "x/z-image-turbo ran 90s with MLX WARN, produced 0 bytes of image output, only ANSI spinner codes",
+        "qwen3-steering reference: same model with MLX produced 01-activation-steering_x_flux2-klein_4b_s42.png (458KB) in 65.2s"
+      ],
+      "status": "confirmed",
+      "tags": [
+        "tooling",
+        "ollama",
+        "image-gen"
+      ],
+      "created_at": "2026-03-25T21:07:24.059856-04:00",
+      "updated_at": "2026-03-25T21:07:24.070007-04:00"
     }
   ],
-  "next_id": 12,
+  "next_id": 13,
   "config": {
     "local": true
   }
