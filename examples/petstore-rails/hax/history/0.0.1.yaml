@@ -1,0 +1,36 @@
+app_version: 0.0.1
+git_sha: null
+date: 2026-03-26
+profile: local
+endpoints:
+  - path: /health
+    total: 25
+    passed: 7
+    failed: 3
+    warned: 3
+    skipped: 12
+  - path: /pets
+    total: 25
+    passed: 7
+    failed: 3
+    warned: 3
+    skipped: 12
+  - path: /pets/1
+    total: 25
+    passed: 7
+    failed: 3
+    warned: 3
+    skipped: 12
+failures:
+  - csp: Content-Security-Policy header missing
+  - hsts: Strict-Transport-Security header missing
+  - corp: Cross-Origin-Resource-Policy header missing
+warnings:
+  - permissions-policy: Permissions-Policy header missing
+  - coep: Cross-Origin-Embedder-Policy header missing
+  - coop: Cross-Origin-Opener-Policy header missing
+notes: |
+  Baseline scan. Rails 8 API-mode provides X-Frame-Options,
+  X-Content-Type-Options, and Referrer-Policy by default.
+  No CSP, HSTS, or CORP configured. No CSRF (API mode).
+  This is the deliberately insecure starting point.

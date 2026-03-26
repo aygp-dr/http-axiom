@@ -1,0 +1,5 @@
+id: local
+description: Direct to Rails, no infrastructure layers
+layers: []
+base_url: http://localhost:3033
+notes: HSTS and Secure cookie axioms skipped (no HTTPS)

@@ -1,0 +1,1514 @@
+#+TITLE: Pet Store: UI Requirements + hax Scenario Evolution
+#+AUTHOR: jw
+#+DATE: 2026-03-26
+#+STARTUP: overview
+#+TODO: REQ OPEN REVIEW | DONE DEFERRED
+
+* Part A — UI Requirements
+
+** A1. Design system and Lookbook
+
+*** REQ A1.1 — Lookbook as component browser
+
+Lookbook (https://github.com/ViewComponent/lookbook) is the Rails-native
+equivalent of Storybook for ViewComponent. Every UI primitive must have a
+Lookbook preview before integration into the pet store app.
+
+Rationale: a design review without a component browser produces
+documentation that drifts from the implementation within one sprint.
+Lookbook is the authoritative rendering of every component in isolation.
+
+Acceptance criteria:
+- ~bundle add lookbook~ in the Gemfile; mount at ~/rails/lookbook~ in
+  development mode only
+- Every ~app/components/*_component.rb~ has a corresponding
+  ~test/components/previews/*_component_preview.rb~
+- CI job fails if a component file has no matching preview
+- Lookbook is the reference for design review sign-off, not Figma exports
+
+Scope of components required for the pet store:
+| Component | States required in preview |
+|-----------|---------------------------|
+| ~PetCardComponent~ | available, sold, pending |
+| ~FormFieldComponent~ | default, error, disabled |
+| ~AlertComponent~ | info, warning, error, success |
+| ~ButtonComponent~ | primary, secondary, destructive, loading |
+| ~TableComponent~ | empty state, paginated, sortable |
+| ~ModalComponent~ | confirmation, form, error |
+
+*** REQ A1.2 — Design tokens
+
+All visual constants (colour, spacing, type scale, radius) must be defined
+as CSS custom properties in ~app/assets/stylesheets/tokens.css~, not as
+Tailwind class strings embedded in component templates.
+
+This separates the design contract (tokens) from the implementation
+contract (components) and allows the design system to evolve independently.
+
+Minimal required token set:
+#+begin_src css
+/* app/assets/stylesheets/tokens.css */
+:root {
+  /* Colour — semantic */
+  --color-brand-primary: #0066cc;
+  --color-danger:        #c0392b;
+  --color-success:       #1d9e75;
+  --color-warning:       #f39c12;
+  --color-surface:       #ffffff;
+  --color-surface-alt:   #f5f4f0;
+
+  /* Spacing scale */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-6: 24px; --space-8: 32px;
+
+  /* Type */
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', monospace;
+  --text-sm: 12px; --text-base: 14px; --text-lg: 16px;
+
+  /* Radius */
+  --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px;
+}
+#+end_src
+
+*** REQ A1.3 — Mock design artefacts
+
+Mock designs are required at three fidelities before any implementation begins:
+
+| Fidelity | Tool | Artefact | Owner |
+|----------|------|----------|-------|
+| Sketch (lo-fi) | Excalidraw | ~docs/mocks/sketch/*.excalidraw~ | UX |
+| Wireframe (mid-fi) | Penpot (open source) | ~docs/mocks/wireframes/*.penpot~ | UX + dev |
+| Annotated (hi-fi) | Penpot | ~docs/mocks/hifi/*.penpot~ | Design |
+
+Penpot is preferred over Figma because:
+- Self-hostable; no external dependency for local review
+- SVG-native exports that version-control cleanly
+- On-premise option aligned with the audit/compliance posture
+
+Each mock must include:
+- All interactive states (hover, focus, error, empty, loading)
+- Annotation layer mapping UI elements to API fields from the OpenAPI spec
+- Accessibility notes (focus order, ARIA labels, colour contrast)
+
+The annotated mock is the input to the Lookbook preview and to the
+hax Playwright test specification (see Part B).
+
+** A2. Integration requirements
+
+*** REQ A2.1 — Component-to-API field mapping
+
+Every form component must declare which OpenAPI ~requestBody~ fields it
+maps to. This mapping lives in a YAML sidecar next to each component.
+
+#+begin_src yaml
+# app/components/pet_form_component.fields.yml
+component: PetFormComponent
+operation_id: addPet           # matches swagger.yaml operationId
+fields:
+  name:      { param: name,      type: string,  required: true  }
+  status:    { param: status,    type: enum,    values: [available, pending, sold] }
+  photo_url: { param: photoUrls, type: array,   item: string, required: false }
+#+end_src
+
+A CI check (~rake components:validate_fields~) verifies that every field
+in the YAML is present in the OpenAPI spec and that the types match.
+This catches drift between the design and the API contract without
+requiring a running server.
+
+*** REQ A2.2 — Authentication and CSRF integration
+
+All form components that mutate state must:
+1. Render a ~hidden_field_tag :authenticity_token~ automatically via
+   ~ApplicationFormBuilder~ (not opt-in per form)
+2. Set the ~SameSite=Strict~ attribute on the session cookie via the
+   Rails session store configuration, not relying on browser defaults
+3. Include an ~Idempotency-Key~ header on all ~POST~ requests via a
+   Stimulus controller that generates a UUID per form render
+
+#+begin_src ruby
+# app/javascript/controllers/idempotency_controller.js
+import { Controller } from "@hotwired/stimulus"
+import { v4 as uuidv4 } from "uuid"
+export default class extends Controller {
+  connect() {
+    this.element.dataset.idempotencyKey ||= uuidv4()
+  }
+  submitWithKey(event) {
+    const key = this.element.dataset.idempotencyKey
+    event.detail.fetchOptions.headers["Idempotency-Key"] = key
+  }
+}
+#+end_src
+
+*** REQ A2.3 — Turbo and hax compatibility
+
+Turbo Drive replaces full-page navigation with fetch. This affects hax
+header axiom checks because the initial page load returns full headers;
+Turbo-driven navigation returns a partial response that may differ.
+
+Requirements:
+- CSP header must be present on both the initial response and on Turbo
+  ~frame~ responses (not only on the full-page response)
+- The Turbo-Drive ~beforeFetch~ hook must not strip the CSRF token on
+  same-origin requests
+- hax must be configured with ~--follow-turbo~ to issue requests that
+  simulate Turbo fetch rather than browser navigation (implementation
+  detail for hax, not for the app)
+
+** A3. Change control for UI
+
+*** REQ A3.1 — UI change categories
+
+All UI changes are categorised before review assignment:
+
+| Category | Definition | Approvers required |
+|----------|-----------|-------------------|
+| Token change | Modifies ~tokens.css~ | Design + senior dev |
+| Component behaviour | Modifies component Ruby/JS | Dev + UX review |
+| New component | Adds a component file | Design review + Lookbook preview |
+| Layout change | Modifies page-level templates | UX + accessibility check |
+| Form change | Any change to a form component | Dev + security (hax re-run) |
+| API field addition | New field mapped in ~.fields.yml~ | Dev + API owner |
+
+Every PR touching a form component automatically triggers the hax
+~csrf,methods~ axiom groups as a required check. This is enforced via
+a GitHub Actions path filter, not a manual process.
+
+*** REQ A3.2 — Lookbook screenshot diff
+
+A visual regression check runs on every PR that modifies a component:
+
+1. CI renders each Lookbook preview at all documented states using
+   ~lookbook-capture~ (headless Playwright against the Lookbook server)
+2. Screenshots are compared against the ~main~ branch baseline stored
+   in S3 as ~s3://petstore-lookbook-baselines/{component}/{state}.png~
+3. Diffs above 0.5% pixel difference are flagged for design review
+4. Design review sign-off updates the baseline in S3
+
+This prevents UI regressions from merging silently. The baseline is
+the authoritative visual contract, not Figma.
+
+*** REQ A3.3 — Changelog and OWASP tagging
+
+Every merged PR touching UI must add an entry to ~CHANGELOG.md~ with:
+- Component name
+- Change category (from A3.1)
+- OWASP reference if the change affects a security property
+- hax axiom groups that were re-run and their result
+
+Example entry:
+#+begin_example
+## [2026-03-25] PetFormComponent — security (OWASP A05)
+- Added Idempotency-Key header via Stimulus controller
+- Added authenticity_token to all form renders (was opt-in)
+- hax re-run: csrf=PASS, methods=PASS, headers=PASS
+#+end_example
+
+---
+
+* Part B — hax Scenario Evolution (Data Team)
+
+The data team's requirement: push problem scenarios to hax over time so
+that we can safely change the pet store app while being confident that
+known vulnerability patterns are not re-introduced.
+
+This is a structured test-case management layer on top of hax, not a
+modification to hax itself.
+
+** B1. Scenario schema
+
+A scenario is a named, versioned description of a vulnerability pattern
+that hax should detect. Scenarios live in ~hax/scenarios/~.
+
+#+begin_src yaml
+# hax/scenarios/csrf-missing-token.yaml
+id: csrf-missing-token
+version: 1
+title: CSRF protection missing on state-changing endpoint
+owasp: A01:2021 Broken Access Control
+rfc: OWASP CSRF Prevention Cheat Sheet
+severity: HIGH
+description: |
+  A POST endpoint accepts requests without a valid CSRF token.
+  The common failure mode is rejecting invalid tokens but accepting
+  absent tokens. Both cases must be rejected with 400 or 403.
+target:
+  methods: [POST, PUT, PATCH, DELETE]
+  paths_include: ["/pets", "/users", "/orders"]
+  paths_exclude: ["/api/webhooks"]  # webhooks use HMAC, not CSRF
+axiom_group: csrf
+draw:
+  - scenario: {token_present: false, token_valid: false}   # must reject
+  - scenario: {token_present: true,  token_valid: false}   # must reject
+  - scenario: {token_present: true,  token_valid: true}    # must accept
+expected: FAIL  # this scenario should trigger on a vulnerable app
+baseline_app: railsgoat@rails_4_2  # known-bad reference
+introduced: 2026-03-25
+introduced_by: data-team
+#+end_src
+
+#+begin_src yaml
+# hax/scenarios/pet-idor.yaml
+id: pet-idor
+version: 1
+title: Insecure direct object reference on pet resource
+owasp: API1:2023 Broken Object Level Authorization
+severity: HIGH
+description: |
+  Authenticated user B can access or modify a pet resource
+  created by user A. Requires two-session auth context.
+target:
+  methods: [GET, PUT, DELETE]
+  paths_pattern: "/pets/{id}"
+axiom_group: cross_user
+auth_context: two_users   # requires --auth-user-a and --auth-user-b
+draw:
+  - create pet as user_a, attempt GET/PUT/DELETE as user_b
+expected: FAIL
+baseline_app: railsgoat@rails_4_2
+introduced: 2026-03-26
+introduced_by: data-team
+#+end_src
+
+** B2. Scenario registry
+
+All scenarios are tracked in ~hax/scenarios/registry.yaml~. The registry
+is the data team's primary artifact — it accumulates problem cases over
+the application's lifetime.
+
+#+begin_src yaml
+# hax/scenarios/registry.yaml
+schema_version: 1
+scenarios:
+  - id: csrf-missing-token
+    path: scenarios/csrf-missing-token.yaml
+    version: 1
+    status: active
+    target_app_versions: [">=1.0.0"]
+    last_run: 2026-03-25
+    last_result: PASS   # PASS = app correctly rejects; scenario fires on railsgoat
+
+  - id: pet-idor
+    path: scenarios/pet-idor.yaml
+    version: 1
+    status: active
+    target_app_versions: [">=1.0.0"]
+    last_run: 2026-03-26
+    last_result: PASS
+
+  - id: cache-sensitive-data
+    path: scenarios/cache-sensitive-data.yaml
+    version: 1
+    status: active
+    last_run: 2026-03-26
+    last_result: FAIL   # ← open issue: /users/me lacks no-store
+#+end_src
+
+** B3. Running scenarios
+
+The ~hax run-scenarios~ subcommand reads the registry and runs each
+active scenario against the target app.
+
+#+begin_src sh
+# Run all active scenarios against staging:
+./hax run-scenarios \
+  --registry hax/scenarios/registry.yaml \
+  --target https://staging.petstore.example.com \
+  --auth-user-a "$USER_A_TOKEN" \
+  --auth-user-b "$USER_B_TOKEN" \
+  --report json \
+  --output .hax/scenario-run-$(date +%Y%m%d).json
+
+# Run only scenarios introduced after a given date:
+./hax run-scenarios \
+  --registry hax/scenarios/registry.yaml \
+  --introduced-after 2026-03-01 \
+  --target https://staging.petstore.example.com
+
+# Validate against the known-bad baseline (must all fail):
+./hax run-scenarios \
+  --registry hax/scenarios/registry.yaml \
+  --target http://localhost:3099 \  # railsgoat
+  --expect-all-fail
+#+end_src
+
+** B4. Scenario result schema
+
+Each scenario run produces a structured result that the data team can
+aggregate over time.
+
+#+begin_src json
+{
+  "run_id": "20260326-143201",
+  "target": "https://staging.petstore.example.com",
+  "app_version": "1.3.2",
+  "git_sha": "a3f9c12",
+  "scenarios": [
+    {
+      "id": "csrf-missing-token",
+      "version": 1,
+      "result": "PASS",
+      "detail": "All 3 token variants correctly rejected or accepted",
+      "duration_ms": 420
+    },
+    {
+      "id": "cache-sensitive-data",
+      "version": 1,
+      "result": "FAIL",
+      "detail": "GET /users/me: Cache-Control missing no-store",
+      "owasp": "A05:2021",
+      "path": "/users/me",
+      "method": "GET",
+      "response_headers": {"Cache-Control": "max-age=3600"},
+      "expected_headers": {"Cache-Control": "no-store"}
+    }
+  ],
+  "summary": {"total": 8, "pass": 7, "fail": 1, "skip": 0}
+}
+#+end_src
+
+** B5. Scenario lifecycle
+
+#+begin_src
+NEW       → a problem is identified (pen test, incident, audit finding)
+DRAFT     → scenario YAML written, not yet in registry
+REVIEW    → PR open; scenario validated against railsgoat (must FAIL)
+ACTIVE    → merged; runs in CI and weekly audit
+DEFERRED  → scenario not applicable to current app version; excluded from runs
+RETIRED   → superseded by a more specific scenario; kept for history
+#+end_src
+
+Promotion from DRAFT to ACTIVE requires:
+1. The scenario fires against ~railsgoat@rails_4_2~ (~expected: FAIL~
+   confirmed)
+2. The scenario passes against the current app (~result: PASS~), meaning
+   the app correctly prevents the vulnerability
+3. PR reviewed by at least one data team member and one developer
+
+If condition 2 fails (the app is also vulnerable), the scenario is merged
+as ACTIVE but the corresponding issue is opened immediately and the CI job
+for that scenario is marked required-failing (it must pass before the
+scenario can be marked PASS).
+
+** B6. Tracking change safety over time
+
+The core data team requirement: as the app changes, can we prove that
+known vulnerability patterns have not been re-introduced?
+
+The safety check compares the scenario results for each app version:
+
+#+begin_src yaml
+# .hax/history/1.3.0.yaml
+app_version: 1.3.0
+git_sha: b2e8a44
+date: 2026-03-01
+scenarios:
+  csrf-missing-token: PASS
+  pet-idor: PASS
+  cache-sensitive-data: FAIL    # known open issue #42
+  hsts-missing: PASS
+
+# .hax/history/1.3.2.yaml
+app_version: 1.3.2
+git_sha: a3f9c12
+date: 2026-03-26
+scenarios:
+  csrf-missing-token: PASS
+  pet-idor: PASS
+  cache-sensitive-data: FAIL    # still open #42
+  hsts-missing: PASS
+  new-scenario-open-redirect: PASS   # added in this version
+#+end_src
+
+A regression is defined as: a scenario that was PASS in version N is FAIL
+in version N+1.
+
+#+begin_src sh
+# Detect regressions between two versions:
+./hax compare-history \
+  --from .hax/history/1.3.0.yaml \
+  --to   .hax/history/1.3.2.yaml \
+  --fail-on-regression
+
+# Output:
+# REGRESSION: cache-sensitive-data was PASS in 1.3.0, FAIL in 1.3.2 ← would flag
+# NEW PASS:   open-redirect     introduced in 1.3.2, result PASS
+# UNCHANGED:  csrf-missing-token PASS in both versions
+#+end_src
+
+This is the deployment gate: a release from staging to production
+requires ~hax compare-history --fail-on-regression~ to exit 0.
+Known-failing scenarios are exempt from regression detection (they are
+already tracked as open issues with the version they were first observed).
+
+** B7. Scenario evolution examples over time
+
+| Version | Scenario added by data team | Trigger |
+|---------|---------------------------|---------|
+| 1.0.0 | ~csrf-missing-token~ | Initial setup; railsgoat baseline |
+| 1.1.0 | ~pet-idor~ | Pen test finding |
+| 1.2.0 | ~cache-sensitive-data~ | Audit finding: /users/me exposed in CDN |
+| 1.2.1 | ~open-redirect-next-param~ | Bug report: ?next= not validated |
+| 1.3.0 | ~idempotency-key-required~ | Payment double-submit incident |
+| 1.3.0 | ~jsonp-callback~ | Code review found legacy callback support |
+| 1.4.0 | ~hsts-preload~ | Compliance requirement |
+| 1.5.0 | ~samesite-cookie-strict~ | Browser deprecation of SameSite=None |
+
+Each row is a data team PR: add a ~.yaml~ file, validate against railsgoat,
+confirm the current app passes, merge. The registry grows monotonically.
+The history files provide the longitudinal safety proof.
+
+** B8. CPRR for scenario management
+
+| ID | Conjecture | Status |
+|----|-----------|--------|
+| S1 | Scenarios validated against railsgoat provide reliable baseline | OPEN — needs benchmark |
+| S2 | One scenario per OWASP reference is sufficient granularity | OPEN — may need path-specific variants |
+| S3 | History file comparison catches all regressions | OPEN — concurrent changes to same path may confuse diff |
+| S4 | DRAFT→ACTIVE gate (must fail on railsgoat) prevents false-positive scenarios | CONFIRMED by design |
+| S5 | Known-failing scenario exemption doesn't hide regression masking | OPEN — needs review |
+
+---
+
+* Part C — Infrastructure Layers: WAF, CDN, DoS, Telemetry
+
+The central problem: hax scenarios that PASS locally (Rails → localhost)
+can FAIL or produce false results when the request traverses infrastructure
+layers — CloudFront, AWS WAF, Shield Advanced, ALB. The infrastructure can:
+
+- Strip or rewrite security headers set by Rails (CDN)
+- Add headers that satisfy axioms the app doesn't actually set (WAF)
+- Return 429 instead of 403 for CSRF violations (rate limiter)
+- Cache error responses, masking the true status (CDN)
+- Block legitimate hax probe requests as attack traffic (WAF)
+
+This makes the infrastructure itself a test target, not just the app.
+Scenarios must declare which layers they are sensitive to, and hax must
+have environment profiles that reflect the actual request path.
+
+** C1. Environment profiles
+
+A profile describes the request path for a given environment. hax uses
+the profile to know which axiom behaviours are attributable to the app
+versus the infrastructure.
+
+#+begin_src yaml
+# hax/profiles/local.yaml
+id: local
+description: Direct to Rails, no infrastructure layers
+layers: []
+base_url: http://localhost:3000
+notes: HSTS and Secure cookie axioms skipped (no HTTPS)
+
+# hax/profiles/staging.yaml
+id: staging
+description: CloudFront → WAF → ALB → ECS Rails
+layers:
+  - type: cdn
+    provider: cloudfront
+    distribution_id: EXXXXXXXXX
+    behaviors:
+      - path: /api/*
+        ttl: 0               # should not cache API responses
+        forward_headers: all # must forward all request headers to origin
+      - path: /assets/*
+        ttl: 31536000        # cache static assets
+  - type: waf
+    provider: aws-waf
+    acl_arn: arn:aws:wafv2:...
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+      - AWSManagedRulesKnownBadInputsRuleSet
+    custom_rules:
+      - name: RateLimitPerIP
+        action: block
+        limit: 2000/5min
+  - type: dos_protection
+    provider: aws-shield
+    level: standard    # standard | advanced
+  - type: alb
+    security_headers_policy: none  # ALB does not add headers; Rails does
+base_url: https://staging.petstore.example.com
+
+# hax/profiles/production.yaml
+id: production
+layers:
+  - type: cdn
+    provider: cloudfront
+    behaviors:
+      - path: /api/*
+        ttl: 0
+        compress: true
+        forward_headers: all
+  - type: waf
+    provider: aws-waf
+    acl_arn: arn:aws:wafv2:...
+  - type: dos_protection
+    provider: aws-shield
+    level: advanced    # Shield Advanced: DDOS report, rate-based rules
+  - type: alb
+base_url: https://petstore.example.com
+#+end_src
+
+** C2. Layer-aware scenario schema
+
+Scenarios declare ~sensitive_to_layers~ — the infrastructure types that
+can cause a false result for this axiom — and ~expected_status_variants~
+for each layer that may intercept the response before Rails does.
+
+#+begin_src yaml
+# hax/scenarios/csrf-missing-token.yaml (updated)
+id: csrf-missing-token
+version: 2
+sensitive_to_layers:
+  - type: waf
+    concern: |
+      AWS WAF managed rule AWSManagedRulesCommonRuleSet includes rule
+      CrossSiteRequest_COOKIE which may block some CSRF probe requests
+      with 403 before they reach Rails. This produces a true-positive
+      result (blocked at WAF) but does not prove Rails enforces the check.
+    detection: |
+      If X-Amzn-Waf-Action: BLOCK appears in response headers, the
+      rejection came from WAF, not Rails. The scenario should re-run
+      with WAF bypass header (internal VPC endpoint) to confirm Rails
+      also rejects.
+  - type: dos_protection
+    concern: |
+      Shield Advanced rate-based rules may return 429 instead of 403
+      for the repeated probe requests hax sends. hax must accept 429
+      as a valid CSRF rejection response when running against profiles
+      with dos_protection layer.
+expected_status:
+  local:   [400, 403]
+  staging: [400, 403, 429]   # 429 acceptable; rate limiter fired before Rails
+  production: [400, 403, 429]
+layer_bypass:
+  method: internal_vpc    # re-run via VPC endpoint skipping CloudFront+WAF
+  endpoint: http://internal.petstore.example.com:3000
+#+end_src
+
+#+begin_src yaml
+# hax/scenarios/cache-sensitive-data.yaml (updated)
+id: cache-sensitive-data
+version: 2
+sensitive_to_layers:
+  - type: cdn
+    concern: |
+      CloudFront may cache a response from Rails even when Rails sets
+      Cache-Control: no-store, if the CloudFront behaviour TTL override
+      is configured incorrectly (DefaultTTL > 0 for /api/* paths).
+      This is a CloudFront misconfiguration, not a Rails bug.
+      hax must distinguish: was the response served from CloudFront cache
+      (X-Cache: Hit from cloudfront) or from origin?
+    detection: |
+      If X-Cache: Hit from cloudfront appears in response headers, the
+      Cache-Control header in the response reflects CloudFront's policy,
+      not Rails's. Run again directly against the ALB origin to confirm
+      Rails sets no-store.
+  - type: alb
+    concern: |
+      ALB may add or strip headers depending on its HTTP header
+      modification rules. Confirm no ALB rule strips Cache-Control.
+layer_checks:
+  - axiom: check_cache_control
+    confirm_origin: true   # run against ALB directly if CDN cache hit
+    alb_origin: http://internal-alb.petstore.example.com
+expected_status:
+  local:   [200]
+  staging: [200]   # X-Cache: Miss expected; if Hit, investigate CloudFront
+#+end_src
+
+** C3. WAF-specific scenarios
+
+#+begin_src yaml
+# hax/scenarios/waf-header-injection.yaml
+id: waf-header-injection
+version: 1
+title: WAF does not inject headers that satisfy security axioms
+owasp: A05:2021 Security Misconfiguration
+severity: MEDIUM
+description: |
+  AWS WAF can be configured to add response headers via response header
+  insertion rules. If WAF adds CSP or HSTS headers, hax axioms appear
+  to PASS even though Rails does not set them. If WAF is ever bypassed
+  (direct ALB access, VPC internal request), the headers are absent.
+  This scenario verifies that security headers originate from Rails,
+  not from WAF header insertion.
+test:
+  - run hax headers group via CloudFront (external path)
+  - run hax headers group via ALB origin directly (bypass CloudFront+WAF)
+  - assert: headers present on ALB-direct response match headers on
+    CloudFront response (modulo CloudFront-added headers like X-Cache)
+  - if headers differ: WAF or CloudFront is injecting; flag for review
+layer_bypass:
+  method: alb_direct
+  endpoint: http://internal-alb.petstore.example.com
+sensitive_to_layers:
+  - type: waf
+  - type: cdn
+expected_status:
+  local:   PASS   # Rails sets headers directly
+  staging: PASS   # Must hold both via CloudFront and via ALB direct
+#+end_src
+
+#+begin_src yaml
+# hax/scenarios/waf-rate-limit.yaml
+id: waf-rate-limit
+version: 1
+title: WAF rate limiting does not mask idempotency enforcement
+severity: LOW
+description: |
+  AWS WAF RateLimitPerIP rule (2000 req/5min) fires before Rails
+  processes idempotency-key validation. If hax sends many idempotency
+  probe requests rapidly, WAF returns 429 and the idempotency axiom
+  cannot be evaluated. Scenario confirms hax throttles its probe rate
+  to stay within WAF limits, and verifies idempotency on the ALB origin.
+mitigation_in_hax: |
+  ./hax run-scenarios --scenario idempotency-key-required \
+    --rate-limit 10/min \  # stay below WAF threshold
+    --layer-bypass alb_direct  # also confirm on origin
+sensitive_to_layers:
+  - type: dos_protection
+  - type: waf
+#+end_src
+
+** C4. DoS / Shield scenarios
+
+#+begin_src yaml
+# hax/scenarios/dos-idempotency-under-load.yaml
+id: dos-idempotency-under-load
+version: 1
+title: Idempotency enforced under concurrent load (Shield + Rails)
+severity: HIGH
+description: |
+  The double-submit payment scenario: two concurrent POST /payments
+  with the same Idempotency-Key must produce exactly one charge.
+  Under Shield Advanced rate-based rules, concurrent requests may be
+  throttled differently per IP, making the race condition harder to
+  reproduce. This scenario runs at low concurrency to stay below Shield
+  thresholds while still exercising the Rails-level idempotency check.
+  
+  The Antithesis/Bombadil path (concurrent deterministic simulation)
+  is the correct tool for exhaustive race condition testing. This
+  scenario is the lightweight CI equivalent.
+test:
+  concurrent_requests: 3   # below Shield rate limit; above hax default
+  same_idempotency_key: true
+  assert: exactly one charge created; all responses return same payment_id
+layer_considerations:
+  - Shield Advanced may return 429 for 2+ of the 3 concurrent requests
+  - If 429 received, scenario is inconclusive at this layer; re-run
+    against ALB direct with concurrency=10
+sensitive_to_layers:
+  - type: dos_protection
+  - type: waf
+#+end_src
+
+** C5. Telemetry requirements
+
+Telemetry is required at three levels to make hax findings actionable
+in production.
+
+*** C5.1 — Structured request logging
+
+Every Rails request must emit a structured JSON log entry that includes
+the fields hax failures reference. This allows a hax finding to be
+correlated with the actual request in CloudWatch Logs.
+
+#+begin_src ruby
+# config/initializers/lograge.rb
+Rails.application.configure do
+  config.lograge.enabled = true
+  config.lograge.formatter = Lograge::Formatters::Json.new
+  config.lograge.custom_options = lambda do |event|
+    {
+      request_id:        event.payload[:request_id],
+      user_id:           event.payload[:user_id],
+      idempotency_key:   event.payload[:idempotency_key],
+      csrf_token_present: event.payload[:csrf_token_present],
+      cache_control:     event.payload[:cache_control],
+      origin:            event.payload[:origin],
+      sec_fetch_site:    event.payload[:sec_fetch_site],
+      waf_action:        event.payload[:waf_action],   # from X-Amzn-Waf-Action
+    }
+  end
+end
+#+end_src
+
+Fields map directly to hax axiom groups:
+| hax axiom | Log field | CloudWatch metric |
+|-----------|-----------|------------------|
+| check_csrf | csrf_token_present | CsrfMissing |
+| check_idempotency | idempotency_key | IdempotencyKeyAbsent |
+| check_sensitive_cache | cache_control | SensitiveResponseCached |
+| WAF intercept | waf_action | WafBlock |
+
+*** C5.2 — CloudWatch custom metrics
+
+A Lambda function subscribes to the Rails log group and emits custom
+metrics for each hax-relevant event. This turns hax findings from
+point-in-time checks into continuous monitoring.
+
+#+begin_src python
+# infrastructure/lambda/hax_metrics.py
+import json, boto3
+cloudwatch = boto3.client('cloudwatch')
+
+def handler(event, context):
+    for record in event['logEvents']:
+        log = json.loads(record['message'])
+        dims = [{'Name': 'Service', 'Value': 'petstore-api'}]
+        metrics = []
+
+        if not log.get('csrf_token_present') and \
+           log.get('method') in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            metrics.append(('CsrfMissing', 1))
+
+        if log.get('cache_control') and \
+           'no-store' not in log['cache_control'] and \
+           log.get('authenticated'):
+            metrics.append(('SensitiveResponseCacheable', 1))
+
+        if log.get('waf_action') == 'BLOCK':
+            metrics.append(('WafBlock', 1))
+
+        if metrics:
+            cloudwatch.put_metric_data(
+                Namespace='PetStore/Security',
+                MetricData=[
+                    {'MetricName': n, 'Value': v,
+                     'Dimensions': dims, 'Unit': 'Count'}
+                    for n, v in metrics
+                ]
+            )
+#+end_src
+
+CloudWatch alarms on these metrics alert the security channel when
+production traffic exhibits patterns matching hax failure scenarios.
+This is the continuous monitoring complement to the scheduled audit.
+
+*** C5.3 — Distributed tracing (X-Ray)
+
+AWS X-Ray traces must capture:
+- The full request path: CloudFront → WAF → ALB → Rails → RDS
+- Which WAF rules matched (extracted from X-Amzn-Waf-Action header)
+- The idempotency key lookup result (hit/miss on the Rails side)
+- The Cache-Control header value at origin vs at edge
+
+This allows a hax failure on staging to be traced back to whether the
+violation occurred at the Rails layer, the ALB, or CloudFront.
+
+#+begin_src ruby
+# config/initializers/xray.rb
+require 'aws-xray-sdk'
+XRay.recorder.configure(
+  name: 'petstore-api',
+  plugins: [:ecs],
+  annotations: lambda { |annotations, req|
+    annotations[:idempotency_key_present] =
+      req.headers['Idempotency-Key'].present?
+    annotations[:csrf_origin] =
+      req.headers['Origin'] || 'direct'
+    annotations[:waf_action] =
+      req.headers['X-Amzn-Waf-Action'] || 'none'
+  }
+)
+#+end_src
+
+*** C5.4 — hax telemetry output
+
+hax itself must emit structured output suitable for ingestion into the
+telemetry pipeline. Each axiom check produces a span with timing.
+
+#+begin_src json
+{
+  "axiom": "check_csp",
+  "path": "/users/me",
+  "method": "GET",
+  "profile": "staging",
+  "layers_traversed": ["cloudfront", "waf", "alb", "rails"],
+  "layer_intercept": null,
+  "result": "FAIL",
+  "duration_ms": 184,
+  "request_id": "a3f9c12-...",
+  "x_cache": "Miss from cloudfront",
+  "waf_action": "none",
+  "response_headers": {
+    "Content-Security-Policy": null,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "max-age=3600"
+  }
+}
+#+end_src
+
+When ~layer_intercept~ is non-null (WAF BLOCK, CDN HIT), hax records
+that the axiom result is attributable to infrastructure, not to Rails,
+and re-runs via the ~layer_bypass~ endpoint if configured.
+
+** C6. Gap analysis: what passes locally but fails in production
+
+This is the complete matrix of known local-vs-production divergences.
+Each row is a scenario that can produce a false result depending on
+which profile it is run against.
+
+| Axiom | Local result | Staging/Prod result | Cause | Mitigation |
+|-------|-------------|---------------------|-------|------------|
+| check_hsts | SKIP (http://) | PASS (if Rails sets header) or FAIL (if ALB strips) | HTTPS only | Run staging profile |
+| check_secure_cookie | SKIP (http://) | PASS or FAIL | Secure flag requires HTTPS | Run staging profile |
+| check_csp | PASS | PASS or WAF-injected PASS | WAF may inject CSP header | Compare CloudFront vs ALB direct |
+| check_cache_control | PASS | PASS or CDN-override FAIL | CloudFront TTL override | Check X-Cache header; confirm no-store on ALB direct |
+| csrf_missing_token | FAIL=PASS | 429=PASS (ambiguous) | WAF rate limit fires first | Accept 429 in staging; confirm via ALB direct |
+| idempotency_key | PASS | PASS or 429=inconclusive | Shield rate limit | Run at low concurrency; ALB direct for definitive |
+| open_redirect | PASS | PASS or 301-to-CDN-default | CDN may intercept bad redirects | Verify Location header is app-controlled |
+| cors_cross_origin | PASS | FAIL | WAF may block OPTIONS preflight | WAF rule: allow OPTIONS from known origins |
+
+** C7. Scenario sensitivity flags
+
+All scenarios gain a ~sensitivity~ block that hax uses to annotate
+results and trigger layer-bypass re-runs automatically.
+
+#+begin_src yaml
+# hax/scenarios/_template.yaml
+sensitivity:
+  cdn_cache:      false   # true if CDN TTL can mask this axiom
+  waf_injection:  false   # true if WAF may inject headers satisfying this axiom
+  waf_intercept:  false   # true if WAF may block probe before Rails
+  rate_limit:     false   # true if repeated probes may trigger 429
+  https_only:     false   # true if axiom is meaningless over HTTP
+layer_bypass:
+  method: null    # null | alb_direct | internal_vpc | direct_ecs
+  endpoint: null
+#+end_src
+
+** C8. Remaining CPRR items
+
+| ID | Conjecture | Status |
+|----|-----------|--------|
+| C1 | WAF managed rules do not inject security headers into responses | OPEN — verify in staging |
+| C2 | CloudFront TTL=0 for /api/* reliably passes Cache-Control: no-store to client | OPEN — requires CloudFront cache stats check |
+| C3 | 429 from Shield/WAF is an acceptable substitute for 403 in CSRF scenarios | OPEN — depends on WAF rule ordering |
+| C4 | ALB does not modify Cache-Control, CSP, or HSTS headers in transit | OPEN — check ALB listener rules |
+| C5 | X-Ray annotations are sufficient to attribute hax failures to infrastructure layer | OPEN |
+| C6 | CloudWatch metrics from lograge provide equivalent coverage to scheduled hax audit | OPEN — complementary, not equivalent |
+
+---
+
+* Part D — Observation Drift: Feature Flags, A/B, Bot Detection, Segmentation, Config
+
+The shared problem across all mechanisms in this section is *observation
+drift*: the same HTTP request returns a different response depending on
+context that hax does not carry by default — flag state, segment
+assignment, bot fingerprint, config variant. A hax axiom result is only
+meaningful relative to the variant it actually observed.
+
+This matters in three directions:
+1. *Per-environment drift* — staging has different flag states than
+   production; the same axiom can PASS on staging and FAIL on production
+   because a different code path is active
+2. *Per-agent drift* — different hax probe identities (auth tokens,
+   User-Agent strings, IP ranges) land on different variants; results
+   are not comparable across runs
+3. *Drift over time* — a flag rollout changes which code path is active;
+   a PASS result from before the rollout does not imply PASS after it
+
+** D1. Feature flags
+
+Feature flags (LaunchDarkly, Flipt, Unleash, Rails Flipper) allow
+individual endpoints, behaviours, or security controls to be activated
+per-user, per-percentage, or per-environment. This creates axiom
+ambiguity: an idempotency requirement that is only enforced when a flag
+is enabled will appear to PASS when hax probes with the flag on, and
+FAIL (or be absent) when probed with the flag off.
+
+*** D1.1 — Scenarios must declare flag context
+
+#+begin_src yaml
+# hax/scenarios/idempotency-key-required.yaml (updated)
+id: idempotency-key-required
+version: 2
+feature_flags:
+  require_idempotency_key:
+    state: enabled        # this scenario only makes sense when flag is on
+    fallback_behaviour: |
+      When flag is disabled, POST /payments may accept requests without
+      Idempotency-Key. Axiom result is PASS at the infrastructure level
+      but reflects the old code path, not the new enforcement.
+      Scenario should be skipped when flag is disabled.
+probe_context:
+  flag_header: "X-Feature-Flags: require_idempotency_key=true"
+  # LaunchDarkly: set user key to a test identity with flag forced on
+  # Flipper: use actor-based gates in test env
+#+end_src
+
+*** D1.2 — Flag state registry
+
+The data team maintains a ~hax/flags/registry.yaml~ that declares which
+flags affect which axioms. CI reads this registry and skips or adjusts
+scenarios whose required flags are not in the expected state for the
+target environment.
+
+#+begin_src yaml
+# hax/flags/registry.yaml
+flags:
+  - id: require_idempotency_key
+    affects_scenarios: [idempotency-key-required]
+    environments:
+      local:      disabled
+      staging:    enabled
+      production: enabled   # rolled out 2026-03-20
+    rollout_date: 2026-03-20
+    rollout_percentage: 100
+
+  - id: new_checkout_flow
+    affects_scenarios: [workflow-bypass, csrf-missing-token]
+    environments:
+      local:      enabled
+      staging:    enabled
+      production: disabled   # canary at 10%
+    rollout_percentage: 10
+    note: |
+      When rollout_percentage < 100, hax probe may land on either
+      the old or new flow. Scenario result is non-deterministic.
+      Use probe_context.flag_header to force a specific variant.
+#+end_src
+
+*** D1.3 — Canary flag drift (the hard case)
+
+When a flag is at partial rollout (e.g., 10%), consecutive hax requests
+may land on different variants. A CSRF axiom PASS on request 1 and FAIL
+on request 2 does not indicate a regression — it indicates the probe
+landed on different code paths.
+
+Mitigation: hax must use sticky identity for flag-sensitive scenarios.
+A stable user key passed to the flag service produces a deterministic
+variant assignment. Without this, the scenario must be run N times and
+the majority result reported, with explicit annotation of the rollout
+percentage.
+
+#+begin_src sh
+./hax run-scenarios \
+  --scenario csrf-missing-token \
+  --profile staging \
+  --flag-context "new_checkout_flow=enabled" \  # force variant
+  --probe-user-key "hax-probe-stable-001"       # stable flag identity
+#+end_src
+
+** D2. A/B testing
+
+A/B frameworks (Optimizely, VWO, Split.io, or Rails-native Vanity gem)
+assign users to experiment variants, typically via a cookie or user ID
+hash. hax probes without a stable assignment cookie appear as new
+visitors and may receive either variant inconsistently.
+
+Unlike feature flags, A/B variants are often sticky per session cookie.
+Once hax is assigned to variant B, all subsequent requests in that
+session see variant B. But a new hax session (new cookie) may get
+variant A.
+
+*** D2.1 — Axiom sensitivity to A/B variants
+
+A/B tests on checkout flows, form layouts, or auth screens directly
+affect security axiom observability:
+
+| A/B test | Affected axioms | Risk |
+|----------|----------------|------|
+| New checkout form (variant B has different form fields) | csrf, idempotency | Variant B may not include CSRF token in new form layout |
+| Auth page redesign (variant B removes hidden fields) | csrf | Hidden authenticity_token field absent in variant B |
+| Payment flow split (variant B uses different endpoint) | idempotency, methods | New endpoint may not have Idempotency-Key enforcement |
+| Rate limit UX change (variant B shows CAPTCHA) | csrf, dos | hax receives CAPTCHA response, cannot evaluate axiom |
+
+*** D2.2 — A/B probe strategy
+
+#+begin_src yaml
+# hax/scenarios/_template.yaml — A/B extension
+ab_context:
+  framework: vanity          # vanity | optimizely | split
+  experiments:
+    - name: new_checkout_form
+      required_variant: control   # run axiom against control variant
+      variant_cookie: "checkout_ab=control"
+      rationale: |
+        Variant B (new form) is under active security review.
+        Axiom baseline should be established against the control.
+        Run again with required_variant: treatment once B is approved.
+#+end_src
+
+** D3. Bot detection and WAF Bot Control
+
+This is the highest-friction mechanism for hax. Bot detection systems
+(AWS WAF Bot Control, Cloudflare Bot Management, DataDome, PerimeterX)
+fingerprint request patterns and respond to identified bots with:
+
+- ~429 Too Many Requests~ (rate gate)
+- ~403 Forbidden~ (block)
+- CAPTCHA challenge (JS challenge page, not an HTTP response hax can parse)
+- Honeypot responses (intentionally malformed data to mislead scrapers)
+- Silent silhouetting (serving cached or modified content to bots
+  without indicating anything is different)
+
+All four outcomes corrupt hax axiom results.
+
+*** D3.1 — hax bot signature problem
+
+hax has a distinct bot fingerprint:
+- Systematic request patterns (all HTTP methods on same path)
+- No JavaScript execution (pure HTTP client)
+- Consistent User-Agent string
+- No cookies from prior navigation (no referrer chain)
+- High request velocity with low variance
+
+AWS WAF Bot Control MANAGED rule group ~BotControl~ will classify hax
+as a bot and may block it, returning 403 before Rails processes the
+request. This makes a CSRF violation look like a PASS (request rejected)
+when in fact it was rejected by WAF for the wrong reason.
+
+*** D3.2 — Bot exemption strategies
+
+Three approaches, in preference order:
+
+*1. Allowlist hax probe IP in WAF*
+#+begin_src hcl
+# infrastructure/waf.tf
+resource "aws_wafv2_ip_set" "hax_probes" {
+  name  = "hax-probe-ips"
+  scope = "CLOUDFRONT"
+  ip_address_version = "IPV4"
+  addresses = var.hax_probe_ips   # GitHub Actions runner IPs, CI IPs
+}
+
+resource "aws_wafv2_rule_group" "hax_bypass" {
+  rule {
+    name     = "AllowHaxProbes"
+    priority = 0
+    action { allow {} }
+    statement {
+      ip_set_reference_statement {
+        arn = aws_wafv2_ip_set.hax_probes.arn
+      }
+    }
+  }
+}
+#+end_src
+
+Limitation: GitHub Actions runner IPs are dynamic. Use a dedicated
+NAT gateway for CI with a fixed Elastic IP, or use OIDC + AWS WAF
+dynamic IP update Lambda.
+
+*2. Internal VPC endpoint (bypass CloudFront+WAF entirely)*
+
+As defined in the layer_bypass pattern (Part C). The definitive test
+of whether Rails enforces the axiom, unaffected by bot detection.
+Trade-off: does not test the full production request path.
+
+*3. Bot-exempt User-Agent header*
+
+Some bot protection vendors support an exemption token in a custom
+header. AWS WAF Bot Control does not natively support this, but a
+custom WAF rule can be created:
+
+#+begin_src hcl
+statement {
+  byte_match_statement {
+    search_string = "hax-probe/1.0"
+    field_to_match { single_header { name = "user-agent" } }
+    positional_constraint = "CONTAINS"
+  }
+}
+action { allow {} }
+#+end_src
+
+*** D3.3 — Distinguishing bot-blocked from app-rejected
+
+hax must inspect the ~X-Amzn-Waf-Action~ (AWS WAF) or
+~cf-mitigated~ (Cloudflare) response headers to determine whether a
+4xx response came from the bot system or from Rails.
+
+#+begin_src yaml
+# hax result annotation — bot intercept detected
+{
+  "axiom": "check_csrf",
+  "result": "INCONCLUSIVE",
+  "reason": "bot_intercept",
+  "detail": "X-Amzn-Waf-Action: BLOCK in response; 403 attributable to WAF Bot Control, not Rails CSRF enforcement",
+  "layer": "waf",
+  "action": "re-run via alb_direct to confirm Rails enforcement"
+}
+#+end_src
+
+** D4. Visitor and customer segmentation
+
+Segmentation systems route requests to different code paths, rate limits,
+or feature sets based on customer tier, geographic region, account age,
+or trust score. This creates per-identity drift that hax must account for.
+
+*** D4.1 — Segmentation-sensitive axioms
+
+| Segment dimension | Affects axioms | Example |
+|------------------|---------------|---------|
+| Customer tier (free/paid/enterprise) | idempotency, rate_limit | Free tier hits rate limits before Idempotency-Key enforcement fires |
+| Geographic region (EU/US) | csp, cache | GDPR-specific CSP rules active only in EU; CloudFront routes differ |
+| Account age (new vs established) | workflow_bypass | New accounts go through additional verification steps |
+| Trust score (risk engine) | csrf, dos | High-risk sessions may get additional CSRF challenges |
+| Internal vs external | all | Internal VPC requests bypass WAF; behaviour differs |
+
+*** D4.2 — Segment-specific scenarios
+
+#+begin_src yaml
+# hax/scenarios/idempotency-free-tier.yaml
+id: idempotency-free-tier
+version: 1
+title: Idempotency enforced for free-tier accounts (rate limit interference)
+segment_context:
+  tier: free
+  auth_user: "$FREE_TIER_USER_TOKEN"
+note: |
+  Free-tier users hit the RateLimitPerIP WAF rule at 500 req/5min
+  (vs 2000 for paid tier). hax repeat probes for idempotency may
+  trigger this limit. Run at rate 5/min for free-tier scenarios.
+rate_limit: 5/min
+sensitive_to_layers:
+  - type: waf
+    concern: Rate limit threshold differs by segment; 429 more likely
+
+# hax/scenarios/csp-eu-region.yaml
+id: csp-eu-region
+version: 1
+title: CSP header correct for EU traffic (GDPR cookie consent script)
+segment_context:
+  region: eu-west-1
+  probe_headers:
+    CloudFront-Viewer-Country: DE
+note: |
+  EU traffic receives a different CSP that allows the cookie consent
+  script domain. The standard CSP axiom check would FAIL for EU traffic
+  if the consent domain is not in the policy.
+  Run this scenario with CloudFront-Viewer-Country header to force
+  EU routing.
+#+end_src
+
+** D5. Config as a driver of drift
+
+Rails config, environment variables, and credentials vary between
+environments. Some config values directly control security properties
+that hax tests.
+
+*** D5.1 — Config-security surface
+
+| Config key | Security property | Local | Staging | Production |
+|-----------|-----------------|-------|---------|------------|
+| ~config.force_ssl~ | HSTS axiom meaningful | false | true | true |
+| ~config.session_store :cookie_store, secure: true~ | Secure cookie flag | false | true | true |
+| ~config.content_security_policy~ | CSP header | development CSP | production CSP | production CSP |
+| ~Rails.application.credentials.idempotency_key_secret~ | HMAC on Idempotency-Key | dev secret | staging secret | production secret |
+| ~config.action_dispatch.default_headers~ | Default security headers | partial | full | full |
+| ~ENV['RAILS_SERVE_STATIC_FILES']~ | Cache headers on assets | false (Puma serves) | true (ALB serves) | true (CloudFront serves) |
+
+*** D5.2 — Config drift detection
+
+A ~hax config-check~ subcommand reads the profile's declared layer
+stack and checks that the Rails config values required for each axiom
+are set appropriately.
+
+#+begin_src sh
+./hax config-check \
+  --profile staging \
+  --rails-env staging \
+  --credentials-file config/credentials/staging.yml.enc
+
+# Output:
+# WARN: config.force_ssl = false in staging; HSTS axiom will be skipped
+# PASS: config.session_store secure: true
+# WARN: content_security_policy not configured in config/initializers/content_security_policy.rb
+# INFO: default_headers does not include X-Permitted-Cross-Domain-Policies; consider adding
+#+end_src
+
+*** D5.3 — Config as a scenario trigger
+
+When config changes, scenarios that depend on that config must be
+re-run automatically. A CI hook on config file changes triggers the
+relevant scenario group.
+
+#+begin_src yaml
+# .github/workflows/config-change.yml
+on:
+  push:
+    paths:
+      - config/initializers/content_security_policy.rb
+      - config/application.rb
+      - config/environments/production.rb
+
+jobs:
+  hax-config-scenarios:
+    steps:
+      - run: |
+          ./hax run-scenarios \
+            --registry hax/scenarios/registry.yaml \
+            --tags config-sensitive \
+            --profile staging
+#+end_src
+
+Every scenario that is sensitive to a config value is tagged
+~config-sensitive~. The path filter ensures that a CSP initializer
+change automatically re-runs all CSP-related scenarios.
+
+** D6. Per-agent drift in multi-agent systems
+
+When multiple agents interact with the pet store (a purchase agent,
+a recommendation agent, an inventory agent), each agent has a
+different identity context and may land on different variants.
+
+This is the most significant evolution from Part C's infrastructure
+drift: the drift is now *inside* the application's logic, not in the
+network path.
+
+*** D6.1 — Agent identity and axiom observability
+
+| Agent identity | Expected behaviour | hax probe context |
+|---------------|-------------------|-----------------|
+| Purchase agent (high-trust, paid tier) | Full idempotency enforcement | --auth-user-a with paid-tier token |
+| Recommendation agent (read-only) | No state-changing endpoints; CSRF not applicable | --groups headers,cache only |
+| Inventory agent (internal VPC) | Bypasses WAF; different rate limits | --profile internal_vpc |
+| External webhook receiver | HMAC auth, not session cookies; CSRF not applicable | --skip-groups csrf,samesite |
+
+*** D6.2 — Agent-specific scenario sets
+
+The data team can define scenario sets scoped to a specific agent role.
+This replaces the current single-set approach with per-agent axiom
+profiles.
+
+#+begin_src yaml
+# hax/agents/purchase-agent.yaml
+agent_id: purchase-agent
+description: Agent that creates and manages purchase orders
+auth_context:
+  token_env: PURCHASE_AGENT_TOKEN
+  tier: paid
+  trust_level: high
+scenario_sets:
+  - scenarios/csrf-missing-token.yaml
+  - scenarios/idempotency-key-required.yaml
+  - scenarios/pet-idor.yaml
+  - scenarios/cache-sensitive-data.yaml
+skip_scenarios:
+  - scenarios/waf-rate-limit.yaml   # paid tier has higher limits; not representative
+
+# hax/agents/recommendation-agent.yaml
+agent_id: recommendation-agent
+description: Read-only agent; never mutates state
+auth_context:
+  token_env: RECOMMENDATION_AGENT_TOKEN
+  tier: paid
+scenario_sets:
+  - scenarios/cache-sensitive-data.yaml
+  - scenarios/pet-idor.yaml          # can still IDOR on read
+skip_scenarios:
+  - scenarios/csrf-missing-token.yaml     # agent uses API key, not session
+  - scenarios/idempotency-key-required.yaml  # no write operations
+#+end_src
+
+** D7. Updated CPRR
+
+| ID | Conjecture | Status |
+|----|-----------|--------|
+| D1 | Feature flag state in hax probe context produces deterministic axiom results | OPEN — requires flag service SDK in hax |
+| D2 | A/B variant assignment is stable across hax probe requests when probe-user-key is fixed | OPEN — depends on assignment mechanism |
+| D3 | Bot detection can be reliably distinguished from app rejection via response headers | OPEN — vendor-specific; AWS WAF headers available, Cloudflare may not expose |
+| D4 | Free-tier rate limit (500/5min) does not interfere with hax at default probe rate | OPEN — measure empirically |
+| D5 | Config drift between environments is fully captured by config-check subcommand | OPEN — credentials differ; partial visibility |
+| D6 | Per-agent scenario sets produce more actionable results than unified scenario runs | CONFIRMED by design — reduces false attribution |
+| D7 | Multi-agent IDOR (agent A accesses resource created by agent B) is covered by pet-idor scenario with agent identities as user_a/user_b | OPEN — scenario currently assumes human user identities |
+
+** D8. Summary: drift taxonomy
+
+| Drift type | Mechanism | hax mitigation |
+|------------|-----------|---------------|
+| Environment drift | config.force_ssl, credentials | Profile + config-check |
+| Infrastructure drift | CDN TTL, WAF rules | Layer-aware scenarios, layer_bypass |
+| Flag drift | Feature flags at partial rollout | Flag registry, probe-user-key, flag_header |
+| Variant drift | A/B experiment assignment | ab_context, variant cookie |
+| Bot drift | Bot detection fingerprinting probe | IP allowlist, WAF exemption rule, VPC bypass |
+| Segment drift | Tier/region routing to different code | Segment-specific scenarios, segment_context |
+| Agent drift | Per-agent identity lands on different variant | Per-agent scenario sets, agent profiles |
+| Time drift | Flag rollout, config deploy, scenario addition | History files, compare-history, scenario lifecycle |
+
+---
+
+* Glossary
+
+Terms are defined as they are used in this document and in hax scenarios.
+Each entry includes its first-use context and related terms.
+
+** Observation drift
+:PROPERTIES:
+:RELATED: environment drift, per-agent drift, layer drift
+:END:
+The axiom result depends on context that hax does not carry by default
+and that differs between probe runs. A PASS on one run and FAIL on
+another may reflect different variants, not a regression. See Part D.
+
+** Axiom
+:PROPERTIES:
+:RELATED: predicate, property, scenario
+:END:
+A predicate over ~(RequestVariant, Response) -> bool~. An axiom holds for
+all inputs in the mutation vocabulary drawn from HTTP RFCs. An axiom
+failure indicates a protocol contract violation. Distinct from a
+~property~ (which may be application-specific) and a ~scenario~ (which
+names a vulnerability pattern).
+
+** Property-Based Testing (PBT)
+:PROPERTIES:
+:RELATED: QuickCheck, Hypothesis, Hegel, shrinking
+:END:
+A testing technique where the tester specifies properties that should
+hold for all inputs in a domain, and the framework generates inputs to
+find counterexamples. Originated with QuickCheck (Claessen & Hughes,
+2000). The Hypothesis implementation introduces ~internal shrinking~,
+which guarantees minimal counterexamples without invalid test cases.
+hax uses PBT for its mutation vocabulary; Hypothesis/Hegel is the
+generation engine.
+
+** Deterministic Simulation Testing (DST)
+:PROPERTIES:
+:RELATED: Antithesis, Bombadil, concurrency, TOCTOU
+:END:
+A testing technique where all sources of non-determinism (time,
+scheduling, network, random number generation) are controlled by a
+hypervisor or simulation layer. Enables exhaustive exploration of
+concurrent scenarios — including race conditions and TOCTOU bugs —
+that are not reachable by sequential PBT. Antithesis is the primary
+DST platform. Bombadil is the open-source complement. hax covers the
+sequential protocol contract; DST covers the concurrent invariants.
+
+** Shrinking
+:PROPERTIES:
+:RELATED: PBT, minimal counterexample, Hypothesis
+:END:
+After a PBT framework finds a failing input, it systematically reduces
+the input to the minimal case that still fails. Hypothesis shrinks by
+reducing the underlying byte sequence. This is why a CSRF failure
+reports ~POST /payments without X-CSRF-Token returns 200~ rather than
+a full multi-kilobyte request trace.
+
+** Mutation vocabulary
+:PROPERTIES:
+:RELATED: axiom, RequestVariant
+:END:
+The set of input variations drawn from HTTP RFC definitions: method
+rotation, header presence/absence/corruption/forgery, origin variation,
+auth context variation, and repeat count. Distinct from application
+schema — the vocabulary is defined by the protocol, not by the endpoint.
+
+** Layer bypass
+:PROPERTIES:
+:RELATED: observation drift, infrastructure, WAF, CDN
+:END:
+Running a hax probe directly against the Rails origin (ALB or internal
+VPC endpoint) rather than through the full infrastructure path
+(CloudFront → WAF → ALB → Rails). Used to attribute an axiom result to
+the application layer when the external path produces an ambiguous result
+(WAF block, CDN cache hit).
+
+** Scenario
+:PROPERTIES:
+:RELATED: axiom, registry, lifecycle
+:END:
+A named, versioned YAML file in ~hax/scenarios/~ that describes a
+vulnerability pattern, maps it to an OWASP reference, declares which
+infrastructure layers can affect its result, and specifies the draw
+strategy. Scenarios accumulate over time as the data team identifies
+new patterns. Every scenario must produce a FAIL result against
+RailsGoat ~rails_4_2~ before it is promoted to ACTIVE.
+
+** Scenario registry
+:PROPERTIES:
+:RELATED: scenario, lifecycle, history
+:END:
+~hax/scenarios/registry.yaml~. The data team's primary artifact.
+Records all active scenarios, their current result, and the target app
+versions they apply to. The registry grows monotonically — scenarios
+are retired, not deleted.
+
+** History file
+:PROPERTIES:
+:RELATED: scenario registry, regression, compare-history
+:END:
+~.hax/history/{version}.yaml~. Records scenario results for a specific
+app version and git SHA. Used by ~hax compare-history~ to detect
+regressions across versions. A regression is a scenario that was PASS
+in version N and is FAIL in version N+1.
+
+** Observation drift taxonomy
+:PROPERTIES:
+:RELATED: feature flags, A/B, bot detection, segmentation, config
+:END:
+The complete set of mechanisms that cause the same HTTP request to
+produce different responses depending on context outside the request:
+environment drift (config differences), infrastructure drift (CDN/WAF),
+flag drift (feature flag state), variant drift (A/B assignment), bot
+drift (fingerprint detection), segment drift (tier/region routing),
+agent drift (per-agent identity), and time drift (flag rollout, scenario
+addition).
+
+** BOLA / IDOR
+:PROPERTIES:
+:RELATED: OWASP API1:2023, cross-user scenario, pet-idor
+:END:
+Broken Object Level Authorization (BOLA) / Insecure Direct Object
+Reference (IDOR). An application accepts a client-supplied identifier
+and accesses the referenced resource without verifying the caller's
+authorization. BOLA is the API-context framing; IDOR is the older web
+framing. Both describe the same root cause. \#1 OWASP API Security risk.
+Modelled in hax by the ~pet-idor~ scenario using two-session auth context.
+
+** Synchronizer Token Pattern (STP)
+:PROPERTIES:
+:RELATED: CSRF, authenticity_token, Rails
+:END:
+The primary CSRF defense: the server embeds an unpredictable token in
+each form/page; every state-changing request must include the token;
+the server rejects requests with missing or invalid tokens. Rails
+implements STP via ~protect_from_forgery~. The hax ~csrf-missing-token~
+scenario tests the common implementation error: rejecting invalid tokens
+but accepting absent tokens.
+
+** Idempotency-Key
+:PROPERTIES:
+:RELATED: RFC IETF draft, double-submit, payment
+:END:
+A client-generated UUID in the ~Idempotency-Key~ request header. The
+server uses it to deduplicate repeated requests: the second POST with
+the same key returns the same response and produces no additional side
+effect. Standardised in IETF draft-ietf-httpapi-idempotency-key-header.
+The hax ~idempotency-key-required~ scenario verifies that a POST without
+the header is rejected (400) and that N posts with the same key produce
+exactly one charge.
+
+** Lookbook
+:PROPERTIES:
+:RELATED: ViewComponent, design review, UI change control
+:END:
+Rails-native component browser for ViewComponent. Every UI component
+must have a Lookbook preview before integration. Lookbook is the
+authoritative design review surface — not Figma exports. Visual
+regression is detected by screenshot diff against an S3 baseline.
+
+** hax profile
+:PROPERTIES:
+:RELATED: environment, layers, observation drift
+:END:
+A YAML file in ~hax/profiles/~ that describes the request path for a
+given environment: the layer stack (CDN, WAF, ALB), the base URL, and
+which axioms are meaningful or skipped. The ~local~ profile has no
+layers and skips HSTS/Secure axioms (no HTTPS). The ~staging~ profile
+declares the CloudFront distribution and WAF ACL ARN.
+
+** Sensitive\_to\_layers
+:PROPERTIES:
+:RELATED: observation drift, scenario, layer bypass
+:END:
+A field in scenario YAML that declares which infrastructure types can
+produce a false axiom result. When ~sensitive\_to\_layers~ includes ~waf~,
+hax checks the ~X-Amzn-Waf-Action~ response header and re-runs via
+~layer\_bypass~ if a WAF intercept is detected.
