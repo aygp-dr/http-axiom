@@ -1,0 +1,142 @@
+#+TITLE: Five Persona Reviews: Synthesis
+#+DATE: 2026-03-25
+
+* Reviewers
+
+1. *Skeptical CISO* — Fortune 500 security leader with Burp/ZAP/Snyk/Semgrep
+2. *Go stdlib purist* — CLI craftsperson, Unix philosophy, 10K+ star projects
+3. *PBT researcher* — Hypothesis/QuickCheck contributor, Hegel follower
+4. *DevOps engineer* — 200+ microservices, CI/CD pipeline owner
+5. *AI coding agent* — The target user whose code lacks security headers
+
+* Universal Agreement (all 5 concur)
+
+- The *problem is real*: AI-generated code systematically omits HTTP compliance
+- The *predicate model is sound*: RFC-grounded, three types, clean taxonomy
+- The *7 stub predicates are misleading*: advertising checks that return "skip"
+- *flag.FlagSet* should replace hand-written parsing (Go purist: "the stdlib is not a dependency")
+
+* Most Damaging Critique: PBT Researcher
+
+#+begin_quote
+"The Go implementation is structured enumeration with deterministic
+mutation, dressed in PBT vocabulary."
+#+end_quote
+
+Key points:
+- Generator samples from 7 methods × 1 path × 1 auth = *7 points*. That's not PBT.
+- Header predicates are *assertions* (~header present?~), not *properties* (~∀ input: invariant holds~)
+- Shrink is correct but *not connected to execution pipeline*
+- Stateful testing (spec.org RuleBasedStateMachine) has *zero Go implementation*
+- *Verdict*: "10% of what the spec describes"
+
+To become real PBT: use ~rapid~ (Go PBT library), generate from large spaces,
+quantify over inputs, integrate shrink with execution.
+
+* Most Actionable Critique: AI Coding Agent
+
+#+begin_quote
+"hax knows what is wrong. It needs to also say exactly how to make
+it right, in the language of the framework being used."
+#+end_quote
+
+Three concrete product ideas:
+1. *hax manifest* — export predicate knowledge as structured pre-generation context
+2. *hax remediate* — return framework-specific fix snippets (Express/FastAPI/Rails/Go)
+3. *hax serve --mcp* — MCP server for in-the-loop agent verification
+
+The agent provided complete middleware snippets for 4 frameworks and then
+admitted: "I am not 100% confident they pass every hax predicate." That's
+the exact feedback loop hax should close.
+
+* Most Practical Critique: DevOps Engineer
+
+Pipeline adoption blockers (priority order):
+1. No false-positive suppression (=.haxignore= / baseline)
+2. Hardcoded auth credentials (executor uses ~Bearer test-token~)
+3. No SARIF/JUnit output
+4. No Docker image
+5. Response body leak (V2) crashes runners at scale
+6. Relevance matrix is dead code (V4)
+
+*Math*: 200 services × 50 endpoints × 50ms latency = 67 min sequential.
+Even parallelized: ~7 min, but V2 leak exhausts file descriptors first.
+
+* Most Structural Critique: Go Purist
+
+#+begin_quote
+"When does 'no framework' become 'bad framework'? When you are
+copy-pasting your own code within the same file."
+#+end_quote
+
+Key points:
+- main.go at 1554 lines with *3 copies* of predicate dispatch logic
+- ~sort.Strings~ avoided because "stdlib is a dependency" — this is religion, not engineering
+- ~NamedPred~ with 3 optional function fields is a *sum type as product type* anti-pattern
+- JSON array pipe contract prevents streaming — use NDJSON
+- Global mutable state (~jsonOutput~, ~verboseMode~) prevents testing
+- Error handling: 3 inconsistent patterns (fatal exit, skip+continue, silent drop)
+
+* Most Strategic Critique: CISO
+
+#+begin_quote
+"Security headers are an infrastructure concern. In a Fortune 500,
+HSTS is set at the load balancer, not in application code."
+#+end_quote
+
+hax needs to decide its user: developers testing locally (header failures
+expected and noisy) or security teams validating infrastructure (duplicates
+existing tools). The *interesting* predicates (CORS reflection, idempotency,
+GET safety) go beyond header scanning — but those are the ones that are stubs.
+
+* What to Take Into the Rebuild
+
+** Accept (change the tool)
+
+| Finding | Source | Action |
+|---------+--------+--------|
+| Use ~flag.FlagSet~ per command | Go purist, all | Replace hand-written parsing |
+| Remove or implement stub predicates | CISO, PBT, DevOps | Don't advertise "skip" |
+| Add ~rapid~ for real PBT | PBT researcher | Generate from large spaces, proper shrink |
+| NDJSON pipe contract | Go purist | Enable streaming pipelines |
+| Structured remediation output | AI agent | ~hax remediate~ with framework snippets |
+| ~hax manifest~ for pre-generation | AI agent | Export predicate knowledge as context |
+| SARIF output | CISO, DevOps | Required for pipeline adoption |
+| Config file with suppression | CISO, DevOps | =.haxrc= with per-predicate overrides |
+| Real auth credential injection | DevOps | ~--header~, ~--bearer-token~, env vars |
+| Fix V2 response body leak | DevOps, contract audit | Close all ~Responses[]~ |
+| Wire relevance matrix in cmdRun | Contract audit | Route mutations to relevant groups only |
+
+** Reject (keep the vision)
+
+| Finding | Source | Why reject |
+|---------+--------+------------|
+| "This is a header checker with aspirations" | CISO | Correct for v1; v2 implements the aspirations |
+| "Not PBT, just structured enumeration" | PBT researcher | Fair for v1; ~rapid~ integration makes it real PBT |
+| "Should be infrastructure, not application" | CISO | Both — hax tests the *deployed result* regardless of where headers are set |
+| "Just use ZAP" | CISO, DevOps | Complementary, not competitive — hax tests invariants ZAP doesn't |
+
+** Defer (future versions)
+
+| Finding | Source | When |
+|---------+--------+------|
+| Stateful PBT (RuleBasedStateMachine) | PBT researcher | v3 — requires ~rapid.MakeMachine~ |
+| MCP server mode | AI agent | v2 — after core predicates work |
+| Docker image | DevOps | After rebuild stabilizes |
+| Coverage-guided generation | PBT researcher | Research — integration with instrumentation |
+
+* Identity Clarification
+
+The reviews converge on an identity question. hax is NOT:
+- A security scanner (that's ZAP/Burp)
+- A header checker (that's SecurityHeaders.com)
+- A compliance tool (that's SARIF-speaking enterprise scanners)
+
+hax IS:
+- A *specification testing tool* for HTTP protocol properties
+- A *property-based testing framework* for RFC invariants (once ~rapid~ is integrated)
+- A *verification gate* for AI-generated code
+- A *pre-generation knowledge source* for AI agents
+
+The rebuild should lead with "RFC compliance via property-based testing"
+not "security scanning."
