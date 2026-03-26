@@ -3,7 +3,7 @@
     {
       "id": 1,
       "title": "CSP presence-only is insufficient",
-      "hypothesis": "A CSP of 'default-src *' or 'unsafe-inline unsafe-eval' provides zero XSS protection yet passes current check. Parsing policy directives will catch \u003e80% of weak CSPs against haxgoat.",
+      "hypothesis": "A CSP of 'default-src *' or 'unsafe-inline unsafe-eval' provides zero XSS protection yet passes current check. Parsing policy directives will catch >80% of weak CSPs against haxgoat.",
       "evidence": [
         "haxgoat /weak-csp: default-src * unsafe-inline unsafe-eval now correctly FAILs",
         "7 CSP tests pass: missing/strong/weak/unsafe-inline-only/wildcard/no-default/granular"
@@ -20,7 +20,7 @@
     {
       "id": 2,
       "title": "HSTS max-age=0 is a security regression",
-      "hypothesis": "max-age=0 disables HSTS per RFC 6797. Parsing the numeric value and failing on \u003c31536000 will catch all HSTS downgrade misconfigurations.",
+      "hypothesis": "max-age=0 disables HSTS per RFC 6797. Parsing the numeric value and failing on <31536000 will catch all HSTS downgrade misconfigurations.",
       "evidence": [
         "haxgoat /hsts-zero: max-age=0 now correctly FAILs with RFC 6797 citation",
         "7 HSTS tests pass: missing/maxage-zero/short/no-includesubdomains/full/preload/parser"
@@ -45,7 +45,9 @@
         "false-negative"
       ],
       "created_at": "2026-03-25T12:07:13.568931-04:00",
-      "updated_at": "2026-03-25T12:07:13.568931-04:00"
+      "updated_at": "2026-03-25T12:07:13.568931-04:00",
+      "assigned_agent": "sec-research",
+      "review_gate": "Is CORS reflection detection within hax scope (predicate, not scanner)?"
     },
     {
       "id": 4,
@@ -58,19 +60,23 @@
         "rfc9110"
       ],
       "created_at": "2026-03-25T12:07:13.570925-04:00",
-      "updated_at": "2026-03-25T12:07:13.570926-04:00"
+      "updated_at": "2026-03-25T12:07:13.570926-04:00",
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Does state comparison require protocol changes or just predicate logic?"
     },
     {
       "id": 5,
       "title": "Relevance matrix eliminates nonsense mutation-predicate pairs",
-      "hypothesis": "Routing mutations to semantically relevant predicate groups via a static matrix will reduce test count by \u003e60% while maintaining full coverage.",
+      "hypothesis": "Routing mutations to semantically relevant predicate groups via a static matrix will reduce test count by >60% while maintaining full coverage.",
       "status": "open",
       "tags": [
         "architecture",
         "relevance-matrix"
       ],
       "created_at": "2026-03-25T12:07:13.572929-04:00",
-      "updated_at": "2026-03-25T12:07:13.572929-04:00"
+      "updated_at": "2026-03-25T12:07:13.572929-04:00",
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Is relevance matrix reduction measurable against current test suite?"
     },
     {
       "id": 6,
@@ -82,7 +88,9 @@
         "predicate-signature"
       ],
       "created_at": "2026-03-25T12:07:13.574909-04:00",
-      "updated_at": "2026-03-25T12:07:13.574909-04:00"
+      "updated_at": "2026-03-25T12:07:13.574909-04:00",
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Does MultiPredicate signature change break existing predicate contract?"
     },
     {
       "id": 7,
@@ -185,9 +193,342 @@
       ],
       "created_at": "2026-03-25T21:07:24.059856-04:00",
       "updated_at": "2026-03-25T21:07:24.070007-04:00"
+    },
+    {
+      "id": 13,
+      "title": "TLA+: Shrink terminates and preserves failure monotonically",
+      "hypothesis": "The oracle Shrink algorithm can be modeled as a TLA+ state machine over a 5-dimensional lattice (headers×auth×origin×method×repeat). The spec should prove: (1) every accepted step strictly decreases a well-founded complexity measure, (2) the failure property is an inductive invariant across all transitions, (3) MaxAttempts is a redundant bound (termination holds without it). If the greedy single-axis strategy can miss globally minimal counterexamples, TLA+ model checking on a bounded instance will produce a concrete witness.",
+      "falsification": "A TLC trace showing a shrink sequence that cycles, diverges, or accepts a non-failing simplification refutes the conjecture. A witness of a 2-dimensional step the greedy shrinker cannot find demonstrates the local-minimum limitation.",
+      "tool": "TLA+/TLC",
+      "acceptance_criteria": [
+        "Shrink.tla spec with 5 shrink dimensions modeled as state variables",
+        "Inductive invariant: current request always produces failure",
+        "Termination proof via well-founded ordering on (|headers|, auth_rank, origin_rank, method_rank, repeat)",
+        "TLC model check on bounded instance (4 headers, full auth/origin ladder, repeat<=5)",
+        "If local-minimum witness found, document as a known limitation with concrete example"
+      ],
+      "status": "open",
+      "tags": [
+        "formal-methods",
+        "tla+",
+        "oracle",
+        "shrinking",
+        "termination"
+      ],
+      "assigned_agent": "lambda",
+      "review_gate": "Does TLA+ shrink model fit hax scope (falsifier, not verifier)?"
+    },
+    {
+      "id": 14,
+      "title": "Alloy: NamedPred tagged union well-formedness and runner dispatch soundness",
+      "hypothesis": "The NamedPred type system (Type field vs Fn/ReqFn/MultiFn population) can be modeled as an Alloy signature with a multiplicity constraint: exactly one function field is populated per type tag. Running the Alloy analyzer on the current predicate definitions will find the 8 type/function mismatches (BUG-1 from invariant review) as counterexamples to the well-formedness constraint. Additionally, modeling Run/RunWithRequest/RunMulti dispatch as Alloy predicates will reveal whether any predicate is unreachable (never dispatched by any runner).",
+      "falsification": "If Alloy finds zero counterexamples to the exclusivity constraint, BUG-1 was misidentified. If all predicates are reachable under current dispatch rules despite the type mismatches, the bug has no practical impact.",
+      "tool": "Alloy",
+      "acceptance_criteria": [
+        "Alloy model with NamedPred sig, Type enum, three optional function fields",
+        "Constraint: Type=Universal => Fn set, ReqFn+MultiFn unset (and similarly for other types)",
+        "Instance generation reproducing the 8 known mismatches as counterexamples",
+        "Dispatch model: Run/RunWithRequest/RunMulti as predicates over NamedPred",
+        "Reachability analysis: which predicates are dispatched by which runner",
+        "Document whether type-tag-based or structural dispatch is the intended semantics"
+      ],
+      "status": "open",
+      "tags": [
+        "formal-methods",
+        "alloy",
+        "predicate",
+        "type-safety",
+        "dispatch"
+      ],
+      "assigned_agent": "lambda",
+      "review_gate": "Does Alloy NamedPred model inform implementation or is it academic exercise?"
+    },
+    {
+      "id": 15,
+      "title": "Dafny: Mutation operators preserve value semantics and relevance matrix is a valid routing",
+      "hypothesis": "Each mutation operator can be specified in Dafny with a postcondition: the original request's Headers map is unmodified (frame condition). The ensures clause `old(req.Headers) == req.Headers` should be provable for all 8 operators after copyHeaders. Additionally, the relevance matrix can be modeled as a function from Mutation→set<Group> with the completeness property: every mutation in AllOperators appears in at least one mapping, and every group in GroupNames is reachable. Dafny's verifier should either prove these or produce a counterexample for originSameSiteMutator (which skips copyHeaders).",
+      "falsification": "If Dafny proves the frame condition for originSameSiteMutator without copyHeaders, the shallow-copy risk identified in the invariant review is not real (Go's value semantics protect it). If the relevance completeness proof fails, there is a dead mutation or unreachable group.",
+      "tool": "Dafny",
+      "acceptance_criteria": [
+        "Dafny model of Request type with Headers as map<string,string>",
+        "Each mutator as a method with ensures old(req.Headers) == req.Headers",
+        "Verification of all 8 operators (expect originSameSite to require annotation or fail)",
+        "Relevance matrix as a total function with completeness lemma",
+        "Document whether Go value semantics make the copyHeaders call formally redundant for non-map-writing mutators"
+      ],
+      "status": "open",
+      "tags": [
+        "formal-methods",
+        "dafny",
+        "mutation",
+        "value-semantics",
+        "relevance"
+      ],
+      "assigned_agent": "lambda",
+      "review_gate": "Does Dafny mutation proof inform Go implementation or stay theoretical?"
+    },
+    {
+      "id": 16,
+      "title": "Lean4: Predicate type algebra and property classification theorem",
+      "hypothesis": "The three predicate types (Universal, Relational, Sequential) form a subtyping lattice where Type 1 ⊂ Type 2 ⊂ Type 3 (every universal property can be checked relationally by ignoring the request, every relational property can be checked sequentially by sending one request). This can be formalized in Lean4 as an inductive type with coercion functions. A theorem should prove: the composition of a Type-k predicate with a mutation of relevance-arity n is well-typed iff k >= n's minimum required type. This gives a type-theoretic foundation for the relevance matrix.",
+      "falsification": "If a Type 1 predicate genuinely cannot be lifted to Type 2 (the response alone is insufficient context even with a trivial request), the subtyping claim is false. The CORS reflection predicate (Type 2) is a candidate: it REQUIRES the request to determine correctness.",
+      "tool": "Lean4",
+      "acceptance_criteria": [
+        "Lean4 inductive type for PredicateType with three constructors",
+        "Coercion functions: Universal→Relational→Sequential with proofs they preserve semantics",
+        "Formalization of the relevance matrix as a dependent type: TestCase (m : Mutation) (gs : List Group) (min_type : PredicateType)",
+        "Theorem: well-typedness of mutation×predicate composition",
+        "At least one example predicate from each type fully formalized with its RFC property statement",
+        "Discussion: is the subtyping lattice the right model, or should types be disjoint with explicit lifting?"
+      ],
+      "status": "open",
+      "tags": [
+        "formal-methods",
+        "lean4",
+        "type-theory",
+        "predicate",
+        "subtyping"
+      ],
+      "assigned_agent": "lambda",
+      "review_gate": "Does Lean4 type algebra change how predicates are dispatched?"
+    },
+    {
+      "id": 17,
+      "title": "TLA+: HTTP method safety and idempotency as state machine properties",
+      "hypothesis": "RFC 9110 §9.2.1 (safe methods) and §9.2.2 (idempotent methods) can be modeled as a TLA+ state machine where server state is an integer counter and HTTP methods are actions. Safety = GET/HEAD/OPTIONS do not change state. Idempotency = PUT/DELETE applied N times yield same state as once. The spec should model hax's checkIdempotencyMulti and checkSafetyMulti predicates and verify they correctly detect violations. This provides a reference oracle: if the TLA+ model says 'violation' and hax says 'pass', hax has a false negative.",
+      "falsification": "If the TLA+ model shows that status-code comparison (which hax avoids per C-004) is equivalent to state comparison for the bounded model, conjecture 4 (idempotency requires state comparison) is weakened.",
+      "tool": "TLA+/TLC",
+      "acceptance_criteria": [
+        "HTTPServer.tla with state variable, GET/PUT/POST/DELETE actions per RFC 9110",
+        "Safety invariant: Safe methods do not modify state",
+        "Idempotency invariant: Idempotent methods applied twice yield same state as once",
+        "Model of hax's checkIdempotencyMulti logic as a TLA+ operator",
+        "TLC counterexample showing a server that passes status-code check but fails state check (validates C-004)",
+        "Bounded model: state space <= 10 values, methods = {GET, PUT, POST, DELETE}"
+      ],
+      "status": "open",
+      "tags": [
+        "formal-methods",
+        "tla+",
+        "methods",
+        "rfc9110",
+        "idempotency",
+        "safety"
+      ],
+      "assigned_agent": "lambda",
+      "review_gate": "Does TLA+ method model produce actionable test oracle improvements?"
+    },
+    {
+      "id": 18,
+      "title": "CORS preflight absence is a testable gap",
+      "hypothesis": "Adding a cors-preflight predicate (Type 3) that sends OPTIONS before a non-simple cross-origin request will detect servers that skip preflight validation. Testing against haxgoat /cors-reflect and /api/transfer will find at least 2 endpoints that serve CORS headers on OPTIONS without validating the method/headers against an allowlist.",
+      "falsification": "If haxgoat endpoints already reject unauthorized preflight methods and the predicate produces zero failures, the gap is theoretical rather than practical.",
+      "status": "open",
+      "tags": [
+        "cross-origin",
+        "cors",
+        "preflight",
+        "fetch-standard",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "sec-research",
+      "review_gate": "Is CORS preflight a Type 3 predicate or does it require new executor capability?"
+    },
+    {
+      "id": 19,
+      "title": "Presence-only predicates produce false passes on semantically invalid headers",
+      "hypothesis": "The 4 presence-only predicates (corp, permissions-policy, etag, vary) will pass on responses with syntactically valid but semantically insecure values. Adding value validation will convert at least 2 current passes to warns or fails against haxgoat endpoints.",
+      "falsification": "If haxgoat never returns invalid values for these headers (only missing or correct), upgrading to semantic checks produces no new findings.",
+      "status": "open",
+      "tags": [
+        "headers",
+        "false-negative",
+        "semantic-vs-presence",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "sec-research",
+      "review_gate": "Do semantic header checks stay within Type 1 or require application context?"
+    },
+    {
+      "id": 20,
+      "title": "Vary: Origin omission enables CORS-based cache poisoning",
+      "hypothesis": "CORS-enabled responses that omit Vary: Origin allow cache poisoning where a same-origin response is served from cache to a cross-origin request. A new vary-origin predicate will find at least 1 vulnerable endpoint in haxgoat.",
+      "falsification": "If haxgoat endpoints already include Vary: Origin on CORS responses, or if Go's net/http automatically adds it, the predicate produces no findings.",
+      "status": "open",
+      "tags": [
+        "cache",
+        "cross-origin",
+        "vary",
+        "cache-poisoning",
+        "rfc9110"
+      ],
+      "assigned_agent": "sec-research",
+      "review_gate": "Is Vary:Origin a standalone predicate or part of existing cache group?"
+    },
+    {
+      "id": 21,
+      "title": "Conditional request predicates close the largest cache group gap",
+      "hypothesis": "Implementing the 304 predicate as Type 3 (GET to obtain ETag, then conditional GET with If-None-Match) will pass against haxgoat /cached-ok and fail/skip against /cached. Together with If-Match for optimistic concurrency, raises cache group from 0 to 2 functional predicates.",
+      "falsification": "If haxgoat /cached-ok does not properly return 304 on conditional GET, the predicate is correct but the test server is buggy.",
+      "status": "open",
+      "tags": [
+        "cache",
+        "conditional-requests",
+        "etag",
+        "rfc9110-s13",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Does 304 predicate need new executor features (conditional request support)?"
+    },
+    {
+      "id": 22,
+      "title": "Cookie prefix validation catches strongest cookie misconfigurations",
+      "hypothesis": "RFC 6265bis S4.1.2.5 cookie prefixes (__Secure-, __Host-) are the strongest cookie security mechanism. A cookie-prefix predicate checking these constraints will catch misconfigured cookies that bypass SameSite protections.",
+      "falsification": "If no production servers use cookie prefixes (adoption near-zero), the predicate is theoretically correct but practically irrelevant at L1.",
+      "status": "open",
+      "tags": [
+        "headers",
+        "cookies",
+        "rfc6265bis",
+        "cookie-prefix",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "sec-research",
+      "review_gate": "Are cookie prefixes observable at L1 or do they require browser context?"
+    },
+    {
+      "id": 23,
+      "title": "RFC citation density correlates with predicate correctness",
+      "hypothesis": "Predicates citing specific RFC sections (hsts, idempotency, safety) have zero confirmed false negatives. Predicates without citations have confirmed gaps. Adding RFC citations to all 25 predicates will surface at least 3 implementation gaps.",
+      "falsification": "If adding citations to all predicates produces zero new implementation changes, the correlation is coincidental.",
+      "status": "open",
+      "tags": [
+        "methodology",
+        "rfc-coverage",
+        "documentation",
+        "correctness"
+      ],
+      "assigned_agent": "observer",
+      "review_gate": "Is RFC citation density a methodology improvement or busywork?"
+    },
+    {
+      "id": 24,
+      "title": "TRACE method disabled is a low-cost high-signal security predicate",
+      "hypothesis": "RFC 9110 S9.3.8 TRACE is routinely disabled to prevent XST attacks. A trace-disabled predicate (Type 3) sending TRACE and checking for 405/501 will find servers that leave TRACE enabled, including haxgoat's default ServeMux.",
+      "falsification": "If Go's default ServeMux returns 405 for TRACE, the predicate passes trivially against haxgoat.",
+      "status": "open",
+      "tags": [
+        "methods",
+        "trace",
+        "rfc9110-s9.3.8",
+        "xst",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "sec-research",
+      "review_gate": "Is TRACE detection a property check or a scan (anti-goal: not a scanner)?"
+    },
+    {
+      "id": 25,
+      "title": "Open redirect detection requires parameter injection not mutation",
+      "hypothesis": "A new open-redirect predicate (Type 2) appending ?url=https://evil.example.com and checking Location header reflection will detect open redirects without a new mutation operator.",
+      "falsification": "If the predicate cannot distinguish legitimate redirects from open redirects without knowing application-specific URL parameter names, it produces false positives on every redirect.",
+      "status": "open",
+      "tags": [
+        "cross-origin",
+        "redirect",
+        "open-redirect",
+        "cwe-601",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "sec-research",
+      "review_gate": "Does open redirect detection require application-specific knowledge (violates L1)?"
+    },
+    {
+      "id": 26,
+      "title": "h2spec naming convention (RFC-section/test-number) is adoptable for hax",
+      "hypothesis": "Renaming predicates from short names to RFC-indexed names (rfc6797-6.1.1, fetch-cors-3.2) makes coverage gaps mechanically detectable: any RFC section without a corresponding test is a gap.",
+      "falsification": "If the rename breaks CLI UX (names too long) or relevance matrix string coupling, the organizational cost outweighs traceability benefit.",
+      "status": "open",
+      "tags": [
+        "methodology",
+        "naming",
+        "h2spec",
+        "traceability",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "observer",
+      "review_gate": "Does h2spec naming break CLI UX or improve traceability?"
+    },
+    {
+      "id": 27,
+      "title": "CSP base-uri and form-action are highest-impact missing CSP directives",
+      "hypothesis": "A CSP with default-src 'self' but no base-uri allows <base> injection hijacking all relative URLs. Adding base-uri and form-action checks to the CSP predicate catches these bypass techniques.",
+      "falsification": "If base-uri and form-action abuse requires attacker-controlled HTML injection (already a CSP bypass), these checks are redundant with script-src.",
+      "status": "open",
+      "tags": [
+        "headers",
+        "csp",
+        "base-uri",
+        "form-action",
+        "w3c-csp3",
+        "rfc-coverage"
+      ],
+      "assigned_agent": "sec-research",
+      "review_gate": "Are base-uri/form-action checks L1 properties or application-level (L2)?"
+    },
+    {
+      "id": 28,
+      "title": "pgregory.net/rapid as test-only PBT dependency closes structural test gaps",
+      "hypothesis": "Adding rapid as a test-only dependency and writing property tests for the 6 core invariants (mutation value semantics, shrink termination, generator bounds, NamedPred type consistency, relevance completeness, Judge arithmetic) will find at least 1 bug the existing example-based tests miss. Properties over AllOperators() are closed under extension — adding mutator #9 automatically tests it. Rapid's integrated shrinking will produce minimal counterexamples without hand-written shrinkers.",
+      "falsification": "If rapid property tests over 10k iterations per invariant find zero new bugs beyond what the existing 4 hand-written deep-copy tests and fixed-input Judge test already cover, the value is marginal and the dep is not worth it.",
+      "acceptance_criteria": [
+        "go.mod gains pgregory.net/rapid as test-only dependency; go build ./... still produces zero-dep binary",
+        "internal/mutation/mutation_property_test.go: value semantics across ALL mutators via AllOperators()",
+        "internal/oracle/oracle_property_test.go: Judge arithmetic (Total == sum) with arbitrary []Result; Shrink termination with arbitrary CheckFunc",
+        "internal/generator/generator_property_test.go: output bounded by Config for arbitrary configs including edge cases (single-element axes)",
+        "internal/predicate/predicate_property_test.go: NamedPred type/field exclusivity across AllGroups()",
+        "internal/relevance/relevance_property_test.go: matrix completeness against AllOperators() and GroupNames()",
+        "All property tests pass with go test -count=1 -rapid.checks=10000"
+      ],
+      "status": "open",
+      "tags": [
+        "testing",
+        "pbt",
+        "rapid",
+        "invariants",
+        "infrastructure"
+      ],
+      "assigned_agent": "code-reviewer",
+      "review_gate": "Does rapid as test-only dep violate zero-dep philosophy for the binary?"
+    },
+    {
+      "id": 29,
+      "title": "Hegel framework integration as deep verification layer via build tags",
+      "hypothesis": "When hegel-go ships, wrapping hax generators as Hegel strategies and running under //go:build hegel will answer whether Hypothesis's byte-level shrinker finds smaller counterexamples than hax's domain-specific lattice descent. If Hypothesis consistently finds smaller minimal failing inputs than oracle.Shrink, hax should delegate shrinking to Hegel. If not, the lattice structure is pulling its weight.",
+      "falsification": "If hegel-go never ships or the CBOR/Unix-socket overhead makes test cycles >10x slower than rapid with no improvement in counterexample minimality, the integration cost exceeds the verification value.",
+      "acceptance_criteria": [
+        "Blocked on: hegel-go stable release",
+        "//go:build hegel test files in internal/oracle/ wrapping oracle.Shrink as a Hegel property",
+        "Side-by-side shrink comparison: same failure set, rapid shrinker vs Hegel/Hypothesis shrinker vs hax lattice shrinker",
+        "CI job with Python/uv available runs hegel-tagged tests separately from stdlib tests",
+        "Document whether byte-level or lattice-level shrinking produces smaller counterexamples for HTTP request domain"
+      ],
+      "priority": "low",
+      "status": "open",
+      "tags": [
+        "testing",
+        "pbt",
+        "hegel",
+        "hypothesis",
+        "shrinking",
+        "future"
+      ],
+      "assigned_agent": "researcher",
+      "review_gate": "Is Hegel integration research or engineering? Blocked on hegel-go."
     }
   ],
-  "next_id": 13,
+  "next_id": 30,
   "config": {
     "local": true
   }

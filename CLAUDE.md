@@ -124,6 +124,61 @@ Every agent MUST:
 - `--json` must work in any flag position (via `stripGlobalFlags` or `flag.FlagSet`)
 - Commands that detect issues must exit non-zero
 
+## Conjecture Workflow
+
+Conjectures (`.cprr/conjectures.json`) drive all changes. The workflow:
+
+1. **Observe** — run hax against targets, read output, find gaps
+2. **Document** — create a conjecture with hypothesis, falsification
+   criteria, and acceptance criteria
+3. **Assign** — every conjecture gets an `assigned_agent` and a
+   `review_gate` (a design/scope question the agent must answer first)
+4. **Gate** — the assigned agent evaluates the review gate BEFORE any
+   implementation. The gate checks whether the conjecture fits hax's
+   design intent, anti-goals, and L1 scope
+5. **Implement** — only after the gate passes, in an isolated worktree
+
+No conjecture becomes code without passing the review gate. The
+coordinator agent (outer loop) observes and documents but does NOT
+implement or decide scope fitness — that is the assigned agent's job.
+
+### Review gate examples
+
+- "Is TRACE detection a property check or a scan?" → if scan, violates
+  anti-goal (not a scanner), conjecture is deferred
+- "Does open redirect detection require app-specific knowledge?" → if
+  yes, it's L2 not L1, out of scope for hax
+- "Does rapid as test-only dep violate zero-dep?" → test deps don't
+  ship in the binary, so no
+
+### Agent assignments by domain
+
+| Agent | Domain |
+|-------|--------|
+| `lambda` | Formal methods (TLA+, Alloy, Dafny, Lean4) |
+| `sec-research` | RFC coverage, security predicates, L1 boundary |
+| `staff-engineer` | Architecture, signatures, executor, relevance |
+| `observer` | Methodology, naming, documentation |
+| `code-reviewer` | Test infrastructure, code quality |
+| `researcher` | Future integrations (Hegel, external tools) |
+
+## Example Applications
+
+`examples/` contains deliberately evolving web applications that serve
+as long-lived hax targets. They are test beds, not products.
+
+| App | Stack | Security surface |
+|-----|-------|-----------------|
+| `petstore-rails` | Rails + ViewComponent + Turbo | Server-rendered, CSRF tokens, cache headers |
+| `todo-clj` | Clojure Ring + Reagent SPA | Cross-origin, JWT cookies, anti-CSRF header |
+
+Each app defines **epochs** (numbered security postures). Epoch 0 is
+deliberately insecure; each subsequent epoch introduces a fix. hax
+scenarios are tagged with the epoch at which their expected results
+become valid, making hax a regression gate across time.
+
+See `examples/*/spec.org` for full specifications.
+
 ## Stack
 
 - Go 1.23+ (stdlib only, flag.FlagSet for rebuild CLI layer)

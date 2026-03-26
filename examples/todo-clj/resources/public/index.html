@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>todo-clj epoch 0</title>
+</head>
+<body>
+  <h1>Todos</h1>
+  <form id="add-form">
+    <input id="title-input" type="text" placeholder="New todo..." required>
+    <button type="submit">Add</button>
+  </form>
+  <ul id="todo-list"></ul>
+
+  <script>
+    var API = '/api/todos';
+
+    function render(todos) {
+      var list = document.getElementById('todo-list');
+      list.innerHTML = '';
+      todos.forEach(function(todo) {
+        var li = document.createElement('li');
+        li.textContent = (todo.done ? '[x] ' : '[ ] ') + todo.title;
+
+        var deleteButton = document.createElement('button');
+        deleteButton.textContent = 'delete';
+        deleteButton.onclick = function() {
+          fetch(API + '/' + todo.id, { method: 'DELETE' }).then(load);
+        };
+
+        var toggleButton = document.createElement('button');
+        toggleButton.textContent = todo.done ? 'undo' : 'done';
+        toggleButton.onclick = function() {
+          fetch(API + '/' + todo.id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: todo.title, done: todo.done ? 0 : 1 })
+          }).then(load);
+        };
+
+        li.appendChild(document.createTextNode(' '));
+        li.appendChild(toggleButton);
+        li.appendChild(document.createTextNode(' '));
+        li.appendChild(deleteButton);
+        list.appendChild(li);
+      });
+    }
+
+    function load() {
+      fetch(API).then(function(r) { return r.json(); }).then(render);
+    }
+
+    document.getElementById('add-form').onsubmit = function(event) {
+      event.preventDefault();
+      var input = document.getElementById('title-input');
+      fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: input.value })
+      }).then(function() {
+        input.value = '';
+        load();
+      });
+    };
+
+    load();
+  </script>
+</body>
+</html>

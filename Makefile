@@ -14,7 +14,8 @@ LDFLAGS := -ldflags "-s -w \
 
 PLATFORMS := linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
 
-# Default
+# Default target: show help (not build)
+.DEFAULT_GOAL := help
 all: build
 
 # --------------------------------------------------------------------------

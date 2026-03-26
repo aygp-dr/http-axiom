@@ -1,0 +1,353 @@
+#+TITLE: Todo App: ClojureScript SPA + Ring API — hax Scenario Evolution
+#+AUTHOR: jw
+#+DATE: 2026-03-26
+#+STARTUP: overview
+#+TODO: REQ OPEN REVIEW | DONE DEFERRED
+
+* Overview
+
+A single-page todo application exercising a different security surface
+than the petstore-rails example. The ClojureScript frontend communicates
+with a Clojure Ring backend via JSON API, creating a CORS-heavy,
+cookie-authenticated architecture where header hygiene and cross-origin
+policy are the primary hax targets.
+
+** Why this app
+
+| Concern | petstore-rails | todo-clj |
+|---------+----------------+----------|
+| Rendering | Server-side (Turbo) | Client-side SPA |
+| Auth | Session cookie + CSRF token | JWT in cookie + anti-CSRF header |
+| CORS | Same-origin (mostly) | Cross-origin (SPA ≠ API origin) |
+| Caching | ETags, Vary, CDN | Aggressive SWR, no-store on mutations |
+| State mutation | Form POST | JSON PATCH/PUT via fetch |
+| Idempotency | Idempotency-Key header | Client-generated request IDs |
+| Stack | Ruby/Rails/ViewComponent | Clojure/Ring/Reagent |
+
+The two apps together cover the full hax predicate surface: petstore
+exercises server-rendered CSRF and cache validation; todo-clj exercises
+SPA CORS, JWT lifecycle, and client-side state consistency.
+
+** Stack
+
+- *Frontend*: ClojureScript + Reagent + shadow-cljs
+- *Backend*: Clojure + Ring + Reitit (routing) + next.jdbc (persistence)
+- *Database*: SQLite (embedded, zero-config)
+- *Build*: deps.edn (no Leiningen)
+
+** Deliberate security posture (for hax to find)
+
+The app starts insecure and hardens over time. Each epoch (see Part B)
+introduces a fix that hax should detect as a state change.
+
+| Epoch | State | What hax should find |
+|-------+-------+---------------------|
+| 0 | No headers | Missing CSP, HSTS, X-Frame-Options, CORP, COEP, COOP |
+| 1 | Weak headers | CSP unsafe-inline, HSTS max-age=0, no SameSite on cookie |
+| 2 | CORS misconfigured | Origin reflection, Access-Control-Allow-Credentials: true |
+| 3 | Auth added (JWT) | SameSite=None without Secure, no anti-CSRF header |
+| 4 | Idempotency gap | PUT not idempotent (counter increment bug) |
+| 5 | Cache misconfigured | Authenticated responses cached without Vary: Authorization |
+| 6 | Hardened | All hax predicates pass |
+
+* Part A — API Design
+
+** A1. Resources
+
+*** REQ A1.1 — Todo CRUD
+
+| Method | Path | Description | Auth |
+|--------+------+-------------+------|
+| GET | /api/todos | List all | Optional |
+| POST | /api/todos | Create | Required |
+| GET | /api/todos/:id | Get one | Optional |
+| PUT | /api/todos/:id | Replace | Required |
+| PATCH | /api/todos/:id | Update fields | Required |
+| DELETE | /api/todos/:id | Delete | Required |
+
+Request/response bodies are JSON. No HTML endpoints except the SPA
+shell (GET / returns index.html which bootstraps ClojureScript).
+
+*** REQ A1.2 — Auth endpoints
+
+| Method | Path | Description |
+|--------+------+-------------|
+| POST | /api/auth/login | Returns JWT in HttpOnly cookie |
+| POST | /api/auth/logout | Clears cookie |
+| GET | /api/auth/me | Returns current user from JWT |
+
+JWT is HttpOnly + Secure + SameSite. The anti-CSRF mechanism is a
+custom header (X-Requested-With: ClojureScript) required on all
+mutating requests — Ring middleware rejects mutations without it.
+
+*** REQ A1.3 — Error responses
+
+All errors return JSON:
+#+begin_src clojure
+{:error   "not-found"
+ :message "Todo 42 does not exist"
+ :status  404}
+#+end_src
+
+Error responses MUST include the same security headers as success
+responses. This is a common gap — error middleware often bypasses
+the header middleware.
+
+** A2. Ring middleware stack
+
+*** REQ A2.1 — Middleware ordering
+
+#+begin_src clojure
+(def app
+  (-> routes
+      (wrap-anti-csrf)         ;; checks X-Requested-With on mutations
+      (wrap-authentication)    ;; extracts JWT from cookie
+      (wrap-cors)              ;; CORS headers (see A2.2)
+      (wrap-security-headers)  ;; CSP, HSTS, X-Frame-Options, etc.
+      (wrap-json-response)     ;; content-type: application/json
+      (wrap-json-body)))       ;; parse request body
+#+end_src
+
+Middleware ordering matters for hax: wrap-security-headers must be
+outermost (after wrap-cors) so headers appear on CORS preflight
+responses, not just on application responses.
+
+*** REQ A2.2 — CORS configuration by epoch
+
+| Epoch | Origin | Credentials | Preflight cache |
+|-------+--------+-------------+-----------------|
+| 0-1 | * | false | none |
+| 2 | reflects Origin header | true | 86400 |
+| 3-5 | http://localhost:3000 | true | 86400 |
+| 6 | https://todo.example.com | true | 86400 |
+
+Epoch 2 is the classic CORS reflection vulnerability that hax
+predicate ~cors-reflection~ should catch.
+
+*** REQ A2.3 — Security headers by epoch
+
+| Header | Epoch 0 | Epoch 1 | Epoch 6 (hardened) |
+|--------+---------+---------+--------------------|
+| CSP | absent | default-src * unsafe-inline | default-src 'self'; script-src 'self' |
+| HSTS | absent | max-age=0 | max-age=31536000; includeSubDomains |
+| X-Frame-Options | absent | absent | DENY |
+| X-Content-Type-Options | absent | absent | nosniff |
+| Referrer-Policy | absent | absent | strict-origin-when-cross-origin |
+| Permissions-Policy | absent | absent | camera=(), microphone=(), geolocation=() |
+| CORP | absent | absent | same-origin |
+| COEP | absent | absent | require-corp |
+| COOP | absent | absent | same-origin |
+
+* Part B — hax Scenario Evolution
+
+** B1. Scenario schema
+
+Each scenario is a YAML file in ~scenarios/~ describing what hax
+should check at a given epoch:
+
+#+begin_src yaml
+# scenarios/001-baseline-headers.yml
+id: S-001
+name: baseline-header-audit
+epoch: 0
+description: Verify all security headers are absent on the unmodified app
+target: http://localhost:8080
+commands:
+  - hax audit http://localhost:8080/
+  - hax audit http://localhost:8080/api/todos
+expected:
+  headers:
+    csp: fail
+    hsts: fail
+    x-frame-options: fail
+    x-content-type-options: fail
+    referrer-policy: fail
+    permissions-policy: fail
+    corp: skip
+    coep: skip
+    coop: skip
+#+end_src
+
+** B2. Epoch transitions as hax regression gates
+
+When a PR claims to fix a security header, hax re-runs the scenario
+registry against the new epoch. The acceptance criterion is:
+
+#+begin_example
+for each scenario S at epoch E:
+  if S.epoch <= current_epoch:
+    all S.expected predicates must match hax output
+  if S.epoch > current_epoch:
+    scenario is skipped (future work)
+#+end_example
+
+This makes hax a regression gate: fixing HSTS in epoch 1 must not
+regress CSP (which is also fixed in epoch 1).
+
+** B3. Cross-origin scenario evolution
+
+| Scenario | Epoch | hax command | Expected |
+|----------+-------+------------+----------|
+| S-010 | 0 | hax audit (no Origin) | cors: skip |
+| S-011 | 2 | hax check --group cross-origin | cors-reflection: fail |
+| S-012 | 3 | hax check --group cross-origin | cors: pass, cors-reflection: pass |
+| S-013 | 3 | hax check --mutation origin-cross-site | cors: pass (locked to specific origin) |
+
+** B4. Idempotency scenario
+
+#+begin_src yaml
+# scenarios/020-idempotency.yml
+id: S-020
+name: put-idempotency
+epoch: 4
+target: http://localhost:8080/api/todos/1
+commands:
+  - hax check --group methods --mutation repeat-N --repeat 3
+expected:
+  methods:
+    idempotency: fail  # PUT increments counter (bug)
+#+end_src
+
+#+begin_src yaml
+# scenarios/021-idempotency-fixed.yml
+id: S-021
+name: put-idempotency-fixed
+epoch: 5
+target: http://localhost:8080/api/todos/1
+commands:
+  - hax check --group methods --mutation repeat-N --repeat 3
+expected:
+  methods:
+    idempotency: pass  # PUT is now truly idempotent
+#+end_src
+
+** B5. Cache scenario
+
+#+begin_src yaml
+# scenarios/030-cache-auth-leak.yml
+id: S-030
+name: cache-auth-response-leak
+epoch: 5
+target: http://localhost:8080/api/todos
+commands:
+  - hax check --group cache
+expected:
+  cache:
+    vary: fail  # Vary: Authorization missing on authenticated response
+    no-store: fail  # Cache-Control: no-store missing on auth'd response
+#+end_src
+
+** B6. Full pipeline scenario (epoch 6)
+
+#+begin_src yaml
+# scenarios/099-full-hardened.yml
+id: S-099
+name: full-hardened-audit
+epoch: 6
+target: http://localhost:8080
+commands:
+  - hax run http://localhost:8080/api/todos
+expected:
+  headers: all-pass
+  methods: all-pass
+  cross-origin: all-pass
+  cache: all-pass
+  state: all-skip  # stubs not yet implemented
+#+end_src
+
+* Part C — Frontend (ClojureScript)
+
+** C1. Reagent components
+
+Minimal component set (not the focus — the API surface is what hax tests):
+
+- ~todo-list~ — fetches GET /api/todos, renders list
+- ~todo-item~ — single todo with toggle/delete
+- ~todo-form~ — POST /api/todos with anti-CSRF header
+- ~login-form~ — POST /api/auth/login
+
+** C2. fetch wrapper
+
+All API calls go through a single ~api-fetch~ function that:
+1. Sets ~X-Requested-With: ClojureScript~ (anti-CSRF)
+2. Includes credentials (for cookie auth)
+3. Sets ~Content-Type: application/json~
+
+#+begin_src clojurescript
+(defn api-fetch [method path & [body]]
+  (js/fetch (str api-base path)
+    (clj->js
+      (cond-> {:method      method
+               :credentials "include"
+               :headers     {"X-Requested-With" "ClojureScript"
+                             "Content-Type"     "application/json"}}
+        body (assoc :body (js/JSON.stringify (clj->js body)))))))
+#+end_src
+
+* Part D — Build and Run
+
+** D1. deps.edn
+
+#+begin_src clojure
+{:deps {org.clojure/clojure       {:mvn/version "1.12.0"}
+        ring/ring-core            {:mvn/version "1.12.0"}
+        ring/ring-jetty-adapter   {:mvn/version "1.12.0"}
+        metosin/reitit-ring       {:mvn/version "0.7.2"}
+        metosin/muuntaja          {:mvn/version "0.6.10"}
+        com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+        org.xerial/sqlite-jdbc    {:mvn/version "3.45.3.0"}
+        buddy/buddy-sign          {:mvn/version "3.5.351"}
+        buddy/buddy-hashers       {:mvn/version "2.0.167"}}
+ :aliases
+ {:dev  {:extra-deps {ring/ring-devel {:mvn/version "1.12.0"}}}
+  :test {:extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
+         :main-opts  ["-m" "kaocha.runner"]}}}
+#+end_src
+
+** D2. Makefile targets
+
+#+begin_src makefile
+.PHONY: dev test hax-epoch
+
+EPOCH ?= 0
+
+dev:         ## Run backend + shadow-cljs
+	clj -M:dev -m todo.main --epoch $(EPOCH)
+
+test:        ## Run kaocha tests
+	clj -M:test
+
+hax-epoch:   ## Run hax scenarios for current epoch
+	@for f in scenarios/*.yml; do \
+	  epoch=$$(grep 'epoch:' "$$f" | awk '{print $$2}'); \
+	  [ "$$epoch" -le "$(EPOCH)" ] || continue; \
+	  echo "=== $$f (epoch $$epoch) ==="; \
+	  # extract and run commands from scenario yaml \
+	done
+#+end_src
+
+* Glossary
+
+** Epoch
+A numbered version of the application's security posture. Epoch 0 is
+the initial insecure state; each subsequent epoch introduces a fix or
+intentional change. hax scenarios are tagged with the epoch at which
+their expected results become valid.
+
+** Anti-CSRF header
+A custom HTTP header (X-Requested-With) required on all mutating
+requests. Since HTML forms cannot set custom headers, this prevents
+cross-origin form submission attacks without requiring a synchronizer
+token. Works in conjunction with SameSite cookies.
+
+** Origin reflection
+A CORS misconfiguration where the server echoes the request's Origin
+header in Access-Control-Allow-Origin, effectively allowing any origin
+to make credentialed cross-origin requests. hax predicate
+~cors-reflection~ detects this by sending Origin: evil.example.com
+and checking whether it's reflected.
+
+** Observation drift
+A change in the security properties observable by hax between two
+points in time. May be intentional (epoch transition) or unintentional
+(regression). See petstore-rails spec.org Part D for the full taxonomy.
