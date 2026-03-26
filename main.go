@@ -909,20 +909,25 @@ Checks:
 	}
 
 	args = stripGlobalFlags(args)
+	_ = args
 
-	fmt.Println("hax doctor")
-	fmt.Println()
+	type doctorCheck struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		Detail string `json:"detail"`
+	}
 
+	var results []doctorCheck
 	checks := 0
 	passed := 0
 
 	// Check: binary built properly.
 	checks++
 	if Version != "dev" {
-		fmt.Println("  [OK]   version: built with ldflags")
+		results = append(results, doctorCheck{"version", "ok", "built with ldflags"})
 		passed++
 	} else {
-		fmt.Println("  [WARN] version: dev build (no ldflags)")
+		results = append(results, doctorCheck{"version", "warn", "dev build (no ldflags)"})
 	}
 
 	// Check: can resolve DNS.
@@ -930,13 +935,48 @@ Checks:
 	client := &http.Client{Timeout: 5 * time.Second}
 	_, err := client.Head("https://httpbin.org/get")
 	if err != nil {
-		fmt.Printf("  [WARN] network: cannot reach httpbin.org: %v\n", err)
+		results = append(results, doctorCheck{"network", "warn", fmt.Sprintf("cannot reach httpbin.org: %v", err)})
 	} else {
-		fmt.Println("  [OK]   network: httpbin.org reachable")
+		results = append(results, doctorCheck{"network", "ok", "httpbin.org reachable"})
 		passed++
 	}
 
+	// JSON output mode.
+	if jsonOutput {
+		status := "pass"
+		if passed < checks {
+			status = "fail"
+		}
+		out := struct {
+			Status  string        `json:"status"`
+			Checks  int           `json:"checks"`
+			Passed  int           `json:"passed"`
+			Results []doctorCheck `json:"results"`
+		}{status, checks, passed, results}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(out)
+		if passed < checks {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Human-readable output.
+	fmt.Println("hax doctor")
+	fmt.Println()
+	for _, r := range results {
+		marker := "WARN"
+		if r.Status == "ok" {
+			marker = "OK"
+		}
+		fmt.Printf("  [%-4s] %s: %s\n", marker, r.Name, r.Detail)
+	}
 	fmt.Printf("\n%d/%d checks passed\n", passed, checks)
+
+	if passed < checks {
+		os.Exit(1)
+	}
 }
 
 // cmdQuickstart prints onboarding context for agents.
