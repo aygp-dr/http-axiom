@@ -14,6 +14,7 @@ import (
 	"github.com/aygp-dr/http-axiom/internal/generator"
 	"github.com/aygp-dr/http-axiom/internal/mutation"
 	"github.com/aygp-dr/http-axiom/internal/oracle"
+	"github.com/aygp-dr/http-axiom/internal/output"
 	"github.com/aygp-dr/http-axiom/internal/predicate"
 	"github.com/aygp-dr/http-axiom/internal/request"
 )
@@ -229,21 +230,21 @@ Flags:
 
 	// Output.
 	if jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(requests)
+		output.JSON(requests)
 		return
 	}
 
 	// Compact table: METHOD  PATH  AUTH  ORIGIN
-	fmt.Printf("%-10s %-30s %-10s %s\n", "METHOD", "PATH", "AUTH", "ORIGIN")
+	headers := []string{"METHOD", "PATH", "AUTH", "ORIGIN"}
+	var rows [][]string
 	for _, r := range requests {
 		path := r.Path
 		if r.BaseURL != "" {
 			path = r.BaseURL + r.Path
 		}
-		fmt.Printf("%-10s %-30s %-10s %s\n", r.Method, path, r.Auth, r.Origin)
+		rows = append(rows, []string{r.Method, path, r.Auth, r.Origin})
 	}
+	output.Table(headers, rows)
 }
 
 // cmdMutate applies mutation operators to HTTP requests.
@@ -358,14 +359,13 @@ Flags:
 
 	// Output.
 	if jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(mutated)
+		output.JSON(mutated)
 		return
 	}
 
 	// Table output: OPERATOR  METHOD  PATH  HEADERS  ORIGIN
-	fmt.Printf("%-20s %-10s %-30s %-8s %s\n", "OPERATOR", "METHOD", "PATH", "HEADERS", "ORIGIN")
+	headers := []string{"OPERATOR", "METHOD", "PATH", "HEADERS", "ORIGIN"}
+	var rows [][]string
 	opIdx := 0
 	for range requests {
 		for _, op := range operators {
@@ -376,9 +376,10 @@ Flags:
 				path = r.BaseURL + r.Path
 			}
 			hdrCount := fmt.Sprintf("%d", len(r.Headers))
-			fmt.Printf("%-20s %-10s %-30s %-8s %s\n", op, r.Method, path, hdrCount, r.Origin)
+			rows = append(rows, []string{op, r.Method, path, hdrCount, r.Origin})
 		}
 	}
+	output.Table(headers, rows)
 }
 
 // cmdCheck runs predicate checks against a target.
@@ -485,9 +486,7 @@ Flags:
 					out = append(out, dryPred{Group: g.Name, Name: p.Name, Type: typeName})
 				}
 			}
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			enc.Encode(out)
+			output.JSON(out)
 			return
 		}
 		fmt.Printf("Dry run: %s\n\n", url)
@@ -582,27 +581,14 @@ Flags:
 
 	// Output.
 	if jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(verdict)
+		output.JSON(verdict)
 		return
 	}
 
 	// Table output.
 	fmt.Printf("Check: %s\n\n", url)
 	for _, r := range verdict.Results {
-		marker := "?"
-		switch r.Status {
-		case "pass":
-			marker = "OK"
-		case "fail":
-			marker = "FAIL"
-		case "warn":
-			marker = "WARN"
-		case "skip":
-			marker = "SKIP"
-		}
-		fmt.Printf("  [%-4s] %-14s %-24s %s\n", marker, r.Group, r.Name, r.Detail)
+		output.Result(r)
 	}
 	fmt.Printf("\nSummary: %d pass, %d fail, %d warn, %d skip\n",
 		verdict.Passed, verdict.Failed, verdict.Warned, verdict.Skipped)
@@ -881,9 +867,7 @@ Flags:
 	// 6. Output
 	// ---------------------------------------------------------------
 	if jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(verdict)
+		output.JSON(verdict)
 		if verdict.Status == "fail" {
 			os.Exit(1)
 		}
@@ -893,18 +877,7 @@ Flags:
 	// Normal / verbose mode: print the verdict summary.
 	fmt.Printf("Run: %s\n\n", url)
 	for _, r := range verdict.Results {
-		marker := "?"
-		switch r.Status {
-		case "pass":
-			marker = "OK"
-		case "fail":
-			marker = "FAIL"
-		case "warn":
-			marker = "WARN"
-		case "skip":
-			marker = "SKIP"
-		}
-		fmt.Printf("  [%-4s] %-14s %-24s %s\n", marker, r.Group, r.Name, r.Detail)
+		output.Result(r)
 	}
 	fmt.Printf("\nSummary: %d pass, %d fail, %d warn, %d skip\n",
 		verdict.Passed, verdict.Failed, verdict.Warned, verdict.Skipped)
@@ -961,9 +934,7 @@ Flags:
 			groups = append(groups, groupView{Name: g.Name, Predicates: names})
 		}
 		if jsonOutput {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			enc.Encode(groups)
+			output.JSON(groups)
 			return
 		}
 		for _, g := range groups {
@@ -979,9 +950,7 @@ Flags:
 			}
 		}
 		if jsonOutput {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			enc.Encode(predicates)
+			output.JSON(predicates)
 			return
 		}
 		for _, p := range predicates {
@@ -992,9 +961,7 @@ Flags:
 		// Derive mutation listing from mutation.AllOperators().
 		mutations := mutation.AllOperators()
 		if jsonOutput {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			enc.Encode(mutations)
+			output.JSON(mutations)
 			return
 		}
 		for _, m := range mutations {
@@ -1004,9 +971,7 @@ Flags:
 	case "methods":
 		methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 		if jsonOutput {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			enc.Encode(methods)
+			output.JSON(methods)
 			return
 		}
 		for _, m := range methods {
@@ -1115,30 +1080,11 @@ Flags:
 
 	// Output.
 	if jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(verdict)
+		output.JSON(verdict)
 		return
 	}
 
-	// Table output.
-	fmt.Printf("Audit: %s\n\n", url)
-	for _, r := range verdict.Results {
-		marker := "?"
-		switch r.Status {
-		case "pass":
-			marker = "OK"
-		case "fail":
-			marker = "FAIL"
-		case "warn":
-			marker = "WARN"
-		case "skip":
-			marker = "SKIP"
-		}
-		fmt.Printf("  [%-4s] %-14s %-24s %s\n", marker, r.Group, r.Name, r.Detail)
-	}
-	fmt.Printf("\nSummary: %d pass, %d fail, %d warn, %d skip\n",
-		verdict.Passed, verdict.Failed, verdict.Warned, verdict.Skipped)
+	output.Verdict(verdict)
 	if verdict.Status == "fail" {
 		os.Exit(1)
 	}
@@ -1230,9 +1176,7 @@ Checks:
 			Passed  int           `json:"passed"`
 			Results []doctorCheck `json:"results"`
 		}{status, checks, passed, results}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(out)
+		output.JSON(out)
 		if passed < checks {
 			os.Exit(1)
 		}
@@ -1336,9 +1280,7 @@ func versionInfo() {
 			GitCommit string `json:"git_commit"`
 			BuildDate string `json:"build_date"`
 		}{Version, GitCommit, BuildDate}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(out)
+		output.JSON(out)
 		return
 	}
 	fmt.Printf("hax %s (commit: %s, built: %s)\n", Version, GitCommit, BuildDate)
