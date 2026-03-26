@@ -1,0 +1,180 @@
+#+TITLE: Rebuild Speculation: http-axiom from First Principles
+#+DATE: 2026-03-25
+
+* What we learned (and would do differently)
+
+** The no-framework constraint cost us
+
+We chose hand-written flag parsing following sb/cprr pattern. This caused:
+- Issue 3 (P0): =--json= only works before command name
+- Issue 6: =-V= vs =-v= collision
+- Issue 4: documented flags not actually parsed
+- Issue 15: =-n= means different things in different commands
+- Round 5 agent entirely dedicated to fixing flag parsing
+
+A minimal framework like =pflag= (what Cobra uses internally) or even
+stdlib =flag= with subcommand dispatch would have prevented all of these.
+The sb/cprr pattern works for <15 flags total. hax has ~40 flags across
+10 commands.
+
+*Decision for rebuild*: Use =flag.NewFlagSet= per command (stdlib, zero deps).
+This gives typed flag parsing, automatic help generation, and consistent
+=-flag= and =--flag= handling. Still zero external dependencies.
+
+** The type extraction should have been commit 1
+
+We extracted =request.Request= in round 3 after it had already leaked
+into generator, mutation, executor, and main.go. The mechanical
+find-replace touched 7 files and caused merge conflicts.
+
+*Decision for rebuild*: =internal/request/request.go= is the first file.
+Everything else imports it.
+
+** predicate.go should never have been a single file
+
+The monolith caused 13 churn events and ~12 merge conflicts across
+rounds 1-2. After splitting into 8 files, round 4 had zero conflicts.
+
+*Decision for rebuild*: Start with per-group files from day one. One file
+per predicate group + types.go + runner.go.
+
+** main.go should be thin
+
+15 touches, every agent touched it. 800+ lines of domain logic
+(audit pipeline, check pipeline, output formatting) embedded in CLI
+dispatch.
+
+*Decision for rebuild*: main.go is ~100 lines: flag parsing + dispatch.
+Each command is a function in =internal/cli/=. Output formatting is in
+=internal/output/=.
+
+** Tests should be per-feature, not per-package
+
+Every round had test file conflicts because agents appended to the
+same =predicate_test.go=.
+
+*Decision for rebuild*: =predicate_csp_test.go=, =predicate_hsts_test.go=,
+etc. One test file per predicate, matching the source file structure.
+
+* Rebuild: 10 commits, zero conflicts
+
+#+begin_example
+Commit  1: internal/request/request.go (domain type)
+Commit  2: internal/predicate/ (types.go, runner.go, 5 empty group files)
+Commit  3: internal/generator/ + internal/mutation/ + internal/relevance/
+Commit  4: internal/executor/ + internal/oracle/
+Commit  5: internal/cli/ (command functions, flag.FlagSet per command)
+Commit  6: internal/output/ (JSON, table, verbose formatters)
+Commit  7: main.go (thin dispatcher, ~100 lines)
+Commit  8: Header predicates (all 10, with per-predicate test files)
+Commit  9: cmd/haxgoat/ (all 23 endpoints)
+Commit 10: Cross-origin + methods + cache + state predicates
+#+end_example
+
+This order has zero file overlap between commits. Agents working on
+commit 8 (headers) and commit 10 (other predicates) would never
+conflict because they touch different files.
+
+* Package structure (rebuild)
+
+#+begin_example
+internal/
+  request/              Commit 1: Request type (leaf)
+  predicate/            Commit 2: framework
+    types.go              Result, NamedPred (with Type), Group, constants
+    runner.go             Run, RunWithRequest, RunMulti
+    headers.go            Commit 8
+    headers_test.go       Commit 8 (per-predicate tests inside)
+    methods.go            Commit 10
+    methods_test.go       Commit 10
+    crossorigin.go        Commit 10
+    crossorigin_test.go   Commit 10
+    cache.go              Commit 10
+    cache_test.go         Commit 10
+    state.go              Commit 10
+    state_test.go         Commit 10
+  generator/            Commit 3
+  mutation/             Commit 3
+  relevance/            Commit 3
+  executor/             Commit 4
+  oracle/               Commit 4
+  cli/                  Commit 5 (NEW: command implementations)
+    audit.go
+    check.go
+    run.go
+    generate.go
+    mutate.go
+    shrink.go
+    list.go
+    doctor.go
+  output/               Commit 6 (NEW: presentation tier)
+    output.go             JSON(), Table(), Verbose()
+main.go                 Commit 7 (~100 lines: parse, dispatch)
+cmd/haxgoat/            Commit 9
+#+end_example
+
+* Flag handling (rebuild)
+
+Using stdlib =flag.FlagSet= per command:
+
+#+begin_src go
+// internal/cli/check.go
+func RunCheck(args []string) int {
+    fs := flag.NewFlagSet("check", flag.ExitOnError)
+    target := fs.String("target", "", "Target URL")
+    fs.StringVar(target, "t", "", "Target URL (shorthand)")
+    group := fs.String("group", "", "Predicate group")
+    fs.StringVar(group, "g", "", "Group (shorthand)")
+    all := fs.Bool("all", false, "Run all groups")
+    dryRun := fs.Bool("dry-run", false, "Show what would be checked")
+    fs.BoolVar(dryRun, "n", false, "Dry run (shorthand)")
+    json := fs.Bool("json", false, "JSON output")
+    verbose := fs.Bool("verbose", false, "Verbose output")
+    fs.BoolVar(verbose, "V", false, "Verbose (shorthand)")
+    fs.Parse(args)
+    // ... implementation
+    return exitCode
+}
+#+end_src
+
+Benefits:
+- =--json= works in any position (=hax check --json -t url= and =hax check -t url --json= both work)
+- Automatic =--help= generation
+- Type safety (=fs.Int= vs manual =fmt.Sscanf=)
+- Flag collision detected at init time
+- Still zero external dependencies
+
+* What agents would do in a rebuild
+
+With the clean structure, agent batches would be:
+
+| Round | Agents | Files | Conflicts |
+|-------|--------|-------|-----------|
+| 1 | Types + framework | request, predicate/types, predicate/runner | 0 (different packages) |
+| 2 | Generator + mutation + relevance + executor + oracle | 5 packages | 0 (different packages) |
+| 3 | CLI commands (5 agents) | cli/audit, cli/check, cli/run, cli/generate, cli/mutate | 0 (different files) |
+| 4 | Predicates (5 agents) | headers.go, methods.go, crossorigin.go, cache.go, state.go | 0 (different files) |
+| 5 | Haxgoat + output + main.go | cmd/haxgoat, output/output, main.go | 0 (different files) |
+
+*5 rounds × 5 agents = 25 agents, zero merge conflicts.*
+
+That is exactly the same agent count as our actual session, but
+without the ~12 conflicts and ~15 minutes of manual merge resolution.
+
+* Cost of NOT rebuilding
+
+The current codebase works. 82 tests pass, 25 predicates, 7 packages.
+The flag parsing issues are fixable (round 5 in progress). The
+structure is clean after round 3's investment.
+
+A rebuild would produce a cleaner git history but the same functional
+result. The knowledge is in the code, the tests, and the docs — not
+in the commit graph.
+
+*Recommendation*: Don't rebuild. The structural investment in rounds 3-4
+already achieved the clean package boundaries. Fix the flag handling
+(round 5), then the codebase is production-ready for the L1 testing
+use case. A rebuild is only warranted if we want to switch to
+=flag.FlagSet= for the CLI layer, which is a localized change to
+main.go and could be done as a single refactor without rebuilding
+the internal packages.
