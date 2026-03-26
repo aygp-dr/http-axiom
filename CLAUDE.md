@@ -94,15 +94,34 @@ internal/relevance/          Mutation → predicate group routing matrix
 docs/formal-model.org        Property type theory and stack position
 ```
 
-## Tracking
+## Multi-Agent Workflow
 
-- `bd` (beads) for issue tracking — `bd ready` shows unblocked work
-- `cprr` for conjectures — each hypothesis tied to a bead
-- `aq` for inter-agent coordination
+The outer loop (human + coordinator agent) merges; worktree agents grind in isolation.
+
+- **Outer loop**: coordinates, reviews, merges branches, runs smoke tests
+- **Worktree agents**: each gets a bead (bd issue), works in `sb`-managed worktree, commits to a branch
+- **aq**: gossip layer — agents announce files they're editing, check for conflicts before starting
+- **bd**: dependency-chained issue tracking — `bd ready` shows unblocked work
+- **cprr**: conjecture tracking — each hypothesis tied to a bead with falsification criteria
+- **sb**: worktree management — one worktree per agent, `sb audit` verifies placement
+
+Every agent should:
+1. `aq announce -c <bead-id> -f "<files>"` before starting
+2. `aq check -f "<file>"` before editing a shared file
+3. Commit to a branch named `<bead-id>-<slug>`
+4. `go build ./...` and `go test ./...` before committing
+
+## Contracts (from audit)
+
+- `request.Request` is a value type — deep-copy `Headers` map before mutation
+- `NamedPred.Type` determines which function field is set (exactly one of Fn/ReqFn/MultiFn)
+- Caller MUST close ALL response bodies in `executor.Result.Responses` (not just `[0]`)
+- `--json` must work in any flag position (via `stripGlobalFlags` or `flag.FlagSet`)
+- Commands that detect issues must exit non-zero
 
 ## Stack
 
-- Go 1.23+ (stdlib only)
-- Make for build orchestration
-- No external dependencies
+- Go 1.23+ (stdlib only, flag.FlagSet for rebuild CLI layer)
+- Make for build orchestration (file-based targets, idempotent)
 - L1 in the testing stack (see docs/formal-model.org)
+- Rebuild option: Cobra/pflag if flag complexity warrants it
