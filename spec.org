@@ -451,6 +451,70 @@ L5  Antithesis / Bombadil        concurrent, distributed, non-deterministic
 http-axiom is L1: the axioms that hold before any application logic runs.
 Every layer above assumes L1 is satisfied.
 
+* Development Toolchain
+
+Prerequisites for bootstrap and rebuild:
+
+#+begin_src bash
+git    # version control
+gh     # GitHub CLI
+bd     # beads issue tracker (github.com/steveyegge/beads)
+sb     # worktree manager (github.com/jwalsh/sb)
+cprr   # conjecture tracker (github.com/jwalsh/cprr)
+aq     # ambient agent queue / gossip (github.com/jwalsh/aq)
+#+end_src
+
+** Agent coordination protocol
+
+#+begin_example
+# Before agent starts work:
+aq announce -c <bead-id> -f "<files>"     # declare intent + files
+aq check -f "<file>"                       # check for conflicts
+
+# Git hooks (.githooks/ activated via core.hooksPath):
+#   pre-commit:  auto-announces staged files to aq broadcast channel
+#   post-commit: announces completion with commit message
+
+# Issue lifecycle:
+bd ready                                   # show unblocked work
+bd update <id> --status in_progress        # claim
+bd close <id> --reason "..."               # complete
+
+# Conjecture lifecycle:
+cprr add "<claim>" --hypothesis "<test>"   # register
+cprr next <id>                             # advance: open → testing
+cprr evidence <id> "<proof>"              # add evidence
+cprr next <id>                             # advance: testing → confirmed
+
+# Worktree isolation:
+sb init                                    # setup worktrees/
+sb add agent-<bead-id>                     # create isolated worktree
+sb audit                                   # verify placement
+#+end_example
+
+** What aq gossip enables
+
+Agents in worktrees are isolated by default — they cannot see each
+other's uncommitted work. aq bridges this gap:
+
+1. *File-level conflict detection*: before editing predicate/headers.go,
+   agent checks if another agent announced that file
+2. *Plan-level coordination*: agents announce not just files but intent
+   ("adding checkReferrerPolicy to HeaderGroup")
+3. *Merge ordering*: agents that provide types (request.Request) announce
+   =--provides=; agents that consume them announce =--depends=
+4. *Session awareness*: the outer-loop coordinator sees all active agents
+
+Without aq, the coordinator discovers conflicts at merge time (too late).
+With aq, the coordinator can reorder or parallelize before launch.
+
+** Lesson from v1 session (2026-03-25)
+
+- 33 agents across 6 rounds; ~15 merge conflicts in rounds 1-2
+- After structural split (predicate.go → 8 files): 0 conflicts in rounds 3-4
+- aq was initialized but agents didn't read broadcasts (no hook enforcement)
+- Rebuild should activate =core.hooksPath .githooks= from commit 1
+
 * CPRR
 
 | ID | Conjecture | Status |

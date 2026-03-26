@@ -105,10 +105,15 @@ The outer loop (human + coordinator agent) merges; worktree agents grind in isol
 - **cprr**: conjecture tracking — each hypothesis tied to a bead with falsification criteria
 - **sb**: worktree management — one worktree per agent, `sb audit` verifies placement
 
-Every agent should:
+Git hooks are active (`.githooks/` via `core.hooksPath`):
+- `pre-commit`: auto-announces staged files to aq broadcast channel
+- `post-commit`: announces completion with commit message
+
+Every agent MUST:
 1. `aq announce -c <bead-id> -f "<files>"` before starting
-2. `aq check -f "<file>"` before editing a shared file
-3. Commit to a branch named `<bead-id>-<slug>`
+2. `aq check -f "<file>"` before editing a shared file — if conflict, coordinate
+3. `aq status` to see what other agents are doing (read the gossip!)
+4. Commit to a branch named `<bead-id>-<slug>`
 4. `go build ./...` and `go test ./...` before committing
 
 ## Contracts (from audit)
