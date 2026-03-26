@@ -1,4 +1,4 @@
-.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp haxgoat juice-shop juice-shop-stop smoke diagram
+.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp haxgoat juice-shop juice-shop-stop smoke diagram images images-all images-clean setup-ollama
 
 BINARY  := hax
 MODULE  := github.com/aygp-dr/http-axiom
@@ -167,6 +167,21 @@ diagram: model-architecture.svg ## Regenerate architecture diagram from mermaid 
 model-architecture.svg: model-architecture.mmd
 	mmdc -i $< -o $@ -b transparent
 	@echo "regenerated $@ from $<"
+
+# --------------------------------------------------------------------------
+# Images: setup
+# --------------------------------------------------------------------------
+
+setup-ollama: ## Install/upgrade ollama with MLX support for image gen
+	brew unpin ollama 2>/dev/null || true
+	brew install ollama || brew upgrade ollama
+	brew services restart ollama
+	@sleep 3
+	@echo "ollama $$(ollama --version 2>&1 | tail -1)"
+	@echo "pulling image models..."
+	ollama pull x/flux2-klein:4b
+	ollama pull x/z-image-turbo
+	@echo "ready: make images"
 
 # --------------------------------------------------------------------------
 # Images (ollama local generation + imagemagick post-processing)
