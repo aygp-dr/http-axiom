@@ -162,6 +162,36 @@ implement or decide scope fitness — that is the assigned agent's job.
 | `code-reviewer` | Test infrastructure, code quality |
 | `researcher` | Future integrations (Hegel, external tools) |
 
+## Verification Boundary
+
+Testing, specs, and validation form hax's boundary tier. Each
+verification tool has a proven scope — do not deviate from the
+assigned tool unless you can demonstrate the alternative is strictly
+better for the property being checked.
+
+| Property class | Tool | Why this tool wins |
+|----------------|------|--------------------|
+| Structural invariants (type tags, field exclusivity, arithmetic) | Go tests + `rapid` | Tests the real code, runs in `go test`, shrinks counterexamples automatically |
+| Value semantics, mutation purity, pipeline contracts | `rapid` property tests | Generates arbitrary inputs, catches edge cases example tests miss |
+| Algorithm termination, monotonicity, bounded complexity | TLA+ / TLC | Exhaustive state exploration proves the property holds for ALL inputs, not just sampled ones |
+| Concurrent interleaving correctness | TLA+ / TLC | Explores all thread schedules — the one thing testing cannot do reliably |
+| Relational constraints (relevance matrix completeness, dead entries) | Alloy | Constraint satisfaction over finite relations is Alloy's native model |
+| Type-theoretic properties (subtyping, dispatch soundness) | Go tests | Go's type system + `Validate()` is sufficient; Lean4/Dafny are academic here |
+
+**Default to `rapid` and Go tests.** Only escalate to TLA+ when the
+property involves concurrency or when exhaustive exploration over a
+bounded state space is required. Only escalate to Alloy when the
+property is naturally relational (sets, mappings, constraints).
+
+Formal specs live in `formal/`. Each spec must:
+1. Reference the Go code it models (file + line range)
+2. Document abstraction gaps (what the spec simplifies)
+3. Produce at least one actionable artifact (a Go test case, a
+   counterexample, or a proof that a guard is redundant)
+
+A spec that models the wrong layer (e.g., the server instead of the
+tester) or proves a tautology is a bug, not a contribution.
+
 ## Example Applications
 
 `examples/` contains deliberately evolving web applications that serve
