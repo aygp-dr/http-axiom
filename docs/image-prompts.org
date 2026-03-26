@@ -1,0 +1,154 @@
+#+TITLE: hax Image Generation Prompts
+#+AUTHOR: aygp-dr
+#+DATE: 2026-03-25
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+Versioned image generation prompts for hax marketing and presentation assets.
+Each prompt is designed for diffusion-model image generators (Flux, Stable Diffusion, Z-Image).
+
+* 1. Hero Image — Pipeline Concept
+
+- Version :: v1
+- Aspect Ratio :: 16:9 (1280x720 or 1536x864)
+- Use Case :: README hero banner, landing page, blog header
+
+** Prompt (v1)
+
+#+begin_quote
+Technical diagram illustration of a security testing pipeline on a dark navy background. Left to right flow with four distinct stages connected by glowing arrows. Stage 1: a cluster of HTTP request envelopes labeled GET, POST, PUT fanning out from a generator icon. Stage 2: mutation operators shown as geometric transformations — rotating arrows, scissors cutting headers, forged stamps. Stage 3: a grid of predicate check boxes with green checkmarks and red X marks, organized in five rows labeled Headers, Methods, Cross-Origin, Cache, State. Stage 4: a large oracle verdict shield split into pass (green) and fail (red) halves. Clean vector style, subtle circuit board pattern in background, accent colors purple (#534ab7), amber (#b87a2a), teal (#0f6e56). Text "hax" in monospace at top left. Professional infographic aesthetic, no photorealism.
+#+end_quote
+
+** Simplified Prompt (v1-short)
+
+#+begin_quote
+Technical security pipeline diagram, dark navy background, four stages left to right: HTTP request generation, mutation operators with scissors and rotation arrows, predicate checking grid with pass/fail marks, oracle verdict shield. Clean vector infographic style, purple and teal accents, monospace "hax" label. Professional, minimal, no photorealism.
+#+end_quote
+
+* 2. OWASP Coverage Diagram
+
+- Version :: v1
+- Aspect Ratio :: 1:1 (1024x1024)
+- Use Case :: Slide deck, documentation, social media card
+
+** Prompt (v1)
+
+#+begin_quote
+Clean infographic showing OWASP Top 10 2021 coverage as a vertical list of ten labeled bars on a white background. Three coverage tiers shown by color: A01 Broken Access Control in solid green (strong), A04 Insecure Design in solid green (strong), A05 Security Misconfiguration in solid green (strong), A02 Cryptographic Failures in amber/yellow (partial), A03 Injection in amber/yellow (partial), A07 Auth Failures in amber/yellow (partial), remaining items A06 A08 A09 A10 in light gray (not covered). Each bar has the OWASP ID and short name. Legend at bottom: green = strong coverage, amber = partial, gray = not targeted. Title "hax OWASP Top 10 Coverage" in bold sans-serif at top. Flat design, no 3D, no shadows, data visualization style.
+#+end_quote
+
+** Simplified Prompt (v1-short)
+
+#+begin_quote
+Clean data visualization infographic, white background. Ten horizontal bars showing OWASP Top 10 coverage: three bars solid green (A01 Access Control, A04 Insecure Design, A05 Misconfiguration), three bars amber (A02, A03, A07 partial coverage), four bars light gray (not covered). Title "hax OWASP Top 10 Coverage" at top. Flat design, minimal, professional chart style.
+#+end_quote
+
+* 3. Before/After Security Audit
+
+- Version :: v1
+- Aspect Ratio :: 16:9 (1280x720)
+- Use Case :: Blog post, slide deck comparison, social media
+
+** Prompt (v1)
+
+#+begin_quote
+Split-screen comparison image, clean technical style. Left side labeled "BEFORE" on a red-tinted background: a terminal window showing HTTP response headers with "0/15 security headers present" in red text, missing CSP, HSTS, X-Frame-Options, SameSite all marked with red X icons. A warning triangle icon. Right side labeled "AFTER hax audit" on a green-tinted background: the same terminal showing a hax audit report with findings highlighted — arrows pointing to each missing header, severity ratings, RFC references. A checklist with items being checked off. Center divider line with a small hax axe logo. Professional, technical documentation style, monospace font for code, no photorealism.
+#+end_quote
+
+** Simplified Prompt (v1-short)
+
+#+begin_quote
+Split-screen technical comparison. Left side red tint: terminal showing "0/15 security headers" with red X marks for missing CSP, HSTS, X-Frame-Options. Right side green tint: hax audit report with findings highlighted, severity ratings, RFC references checked off. Center divider with axe icon. Clean documentation style, monospace font, professional.
+#+end_quote
+
+* 4. Stack Position Diagram (L0-L5)
+
+- Version :: v1
+- Aspect Ratio :: 3:4 (864x1152) or 1:1 (1024x1024)
+- Use Case :: Slide deck, architecture documentation, comparison chart
+
+** Prompt (v1)
+
+#+begin_quote
+Vertical stack diagram showing six testing layers as stacked horizontal blocks, labeled L0 through L5 from bottom to top. Each layer has a name and example tool. L0 (bottom) "Unit Tests" in light gray with "go test" label. L1 "Protocol Axioms" in bright purple (#534ab7) with "hax" label, highlighted with a glowing border and a small axe icon — this is the featured layer. L2 "API Contract" in light gray with "Schemathesis" label. L3 "Integration" in light gray with "Postman" label. L4 "DAST Scanner" in light gray with "nuclei" label. L5 (top) "Pentest" in light gray with "manual" label. The L1 layer is 2x the height of others, glowing, with an arrow saying "hax lives here". Clean architectural diagram, dark background, flat design, no 3D perspective.
+#+end_quote
+
+** Simplified Prompt (v1-short)
+
+#+begin_quote
+Vertical stack diagram, six layers L0 to L5 on dark background. L0 Unit Tests, L1 Protocol Axioms highlighted in bright purple with "hax" label and glowing border, L2 API Contract, L3 Integration, L4 DAST Scanner, L5 Pentest. Other layers in gray. L1 is the featured layer. Clean flat architectural diagram style, professional.
+#+end_quote
+
+* 5. Badge / Logo
+
+- Version :: v1
+- Aspect Ratio :: 1:1 (1024x1024)
+- Use Case :: GitHub repo icon, favicon, social avatar, badge
+
+** Prompt (v1)
+
+#+begin_quote
+Minimal geometric icon design on a solid dark purple (#2d2366) circular background. Three overlapping elements centered: a small stylized axe silhouette in white (representing "hax" — the tool name), a hexagonal shield outline in teal (#0f6e56) surrounding the axe (representing security), and a simple checkmark in bright green (#4CAF50) at the bottom right corner of the shield (representing testing/verification). The axe blade faces right, the shield is tilted slightly. Ultra-clean vector style, no gradients, no text, symmetrical, works at 32px and 512px. Icon design, logo mark, flat design, minimal.
+#+end_quote
+
+** Simplified Prompt (v1-short)
+
+#+begin_quote
+Minimal geometric icon, dark purple circle background. White axe silhouette, teal hexagonal shield outline, bright green checkmark. Ultra-clean flat vector logo mark, no text, no gradients, symmetrical, works at any size.
+#+end_quote
+
+* Generation Notes
+
+** Models
+
+| Model | Size | Best for | Notes |
+|-------|------|----------|-------|
+| x/z-image-turbo:latest | 12 GB | Fast iterations | Via ollama CLI |
+| x/flux2-klein:4b | 5.7 GB | Flux-based quality | Via ollama CLI |
+| Z-Image-Turbo (HF) | remote | Quality generation | Via HF Spaces / MCP |
+
+** Ollama CLI Usage
+
+Ollama *does* support image generation via ~ollama run~ for models with
+the ~image~ capability. The ~x/z-image-turbo:latest~ model (10.3B params,
+FP8, 12 GB) shows a "Generating" progress bar when invoked.
+
+*Known issue:* On this machine, the MLX dynamic library is not available
+(ollama 0.16.3 searches ~/opt/homebrew/Cellar/ollama/0.16.3/bin~ and
+the local build directory). Without MLX acceleration, the model falls
+back to CPU inference, which is prohibitively slow for a 10.3B diffusion
+model (stuck at 0/9 steps after 60 seconds).
+
+#+begin_src bash
+# Verify model capabilities
+ollama show x/z-image-turbo:latest
+# Should show: Capabilities: image
+
+# Generate image (requires MLX or GPU acceleration)
+ollama run x/z-image-turbo:latest "Generate an image: [paste prompt here]"
+# Output: generates image inline in terminal (iTerm2/kitty) or saves to file
+
+# Fix MLX acceleration (if on Apple Silicon):
+# 1. Ensure ollama is updated: brew upgrade ollama
+# 2. Check MLX library path in ollama logs
+# 3. Alternatively, use the ollama API:
+curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "x/z-image-turbo:latest", "prompt": "..."}'
+
+# Alternative local tools for image generation:
+# - ComfyUI with Flux models
+# - Automatic1111 / Forge with SD models
+# - diffusers Python library with local GPU
+#+end_src
+
+** Hugging Face Spaces
+
+The Z-Image-Turbo model is available as a Hugging Face Space with MCP tool
+integration. Use the ~gr1_z_image_turbo_generate~ tool with the prompts above.
+
+** Version History
+
+| Version | Date | Change |
+|---------|------|--------|
+| v1 | 2026-03-25 | Initial prompts for all five images |

@@ -1,0 +1,347 @@
+#+TITLE: hax — Presentation Outline (10 Slides)
+#+AUTHOR: aygp-dr
+#+DATE: 2026-03-25
+#+OPTIONS: toc:2 num:t
+
+* Presentation Metadata
+
+- Duration :: 20-25 minutes (10 slides + demo)
+- Audience :: Security engineers, backend developers, DevSecOps teams
+- Format :: Technical talk with live demo
+- Assets :: See ~docs/image-prompts.org~ for slide imagery
+
+* Slide 1: Title + Tagline
+
+** Content
+
+- Title: *hax* — Property-Based HTTP Axiom Tester
+- Tagline: "QuickCheck for HTTP compliance"
+- Subtitle: Zero-dependency, RFC-grounded protocol testing
+- Visual: Hero image (pipeline diagram)
+- Badges: Go 1.23+, zero deps, MIT license
+
+** Speaker Notes
+
+Open with the one-liner: "What if we treated HTTP compliance the way
+Haskell treats correctness — as properties that must hold for all inputs?"
+
+Introduce yourself briefly. Frame this as a new category of tool:
+not a scanner, not a fuzzer, not a proxy. A property-based axiom tester.
+Mention the name: hax = HTTP Axiom tester (also: axe for chopping through
+bad assumptions).
+
+* Slide 2: The Problem — Tenzai Case Study
+
+** Content
+
+- Headline: "AI-generated code ships with zero security headers"
+- Stat: 0/15 Tenzai-generated applications set CSP, HSTS, or SameSite
+- Visual: Before/after split image (image prompt #3)
+- Bullet points:
+  - Frameworks set some headers, but LLM-generated code often bypasses them
+  - Figma-to-code pipelines model the happy path only
+  - No concept of Origin, CORS, or cookie attributes in design tools
+  - "What the UI sends != what the server accepts from anywhere"
+
+** Speaker Notes
+
+This is the motivating observation. Walk through a concrete example:
+a Tenzai-generated Express.js app. Show the response headers — no CSP,
+no HSTS, no X-Content-Type-Options. Point out that this is not unique
+to Tenzai; Cursor, Copilot, and v0 all exhibit the same pattern.
+
+The Figma blind spot: designers model a single cooperative actor on the
+happy path. Every security axiom lives in the gap between what the UI
+sends and what the server will accept from anywhere.
+
+* Slide 3: What hax Does — Pipeline Diagram
+
+** Content
+
+- Visual: Full pipeline diagram (from README / image prompt #1)
+- Four-stage flow:
+  1. *Request Generator* — Cartesian product of method x path x headers x auth x origin x repeat
+  2. *Mutation Vocabulary* — 8 operators: header-omit, header-corrupt, header-forge, method-rotate, origin-cross-site, origin-same-site, repeat-N, repeat-concurrent
+  3. *Predicate Groups* — 18 RFC-grounded checks in 5 groups
+  4. *Oracle* — pass/fail verdict with Hegel-based shrinking
+- Key point: Every predicate is a property: ~forall r in RequestVariants(mutation, target): P(execute(r))~
+
+** Speaker Notes
+
+Walk through each stage left to right. Emphasize the formal model:
+this is structurally identical to QuickCheck/Hypothesis. We generate
+inputs (request variants), apply them (send HTTP), check a property
+(RFC predicate), and shrink on failure.
+
+Mention the relevance matrix: not every mutation is relevant to every
+predicate group. header-omit routes to Headers and Cross-Origin, but
+not to State. This reduces the test space intelligently.
+
+* Slide 4: Demo — hax audit Against haxgoat
+
+** Content
+
+- Live terminal demo (or recorded screencast as backup)
+- Commands:
+  #+begin_example
+  make haxgoat          # start vulnerable target on :9999
+  ./hax audit http://localhost:9999
+  ./hax audit http://localhost:9999/secure
+  ./hax --json audit http://localhost:9999 | jq
+  #+end_example
+- Show: insecure endpoint fails 15+ checks, /secure endpoint passes
+- Show: JSON output for CI/CD pipeline integration
+
+** Speaker Notes
+
+This is the centerpiece. Start haxgoat, then run the audit. Let the
+output speak. Point out the contrast between the insecure default
+endpoint (no headers, no CSRF protection, no rate limiting) and the
+/secure endpoint (all headers set, proper CORS, rate limiting).
+
+Show the JSON output mode and explain how this plugs into CI/CD:
+"This is one line in your GitHub Actions workflow."
+
+If time permits, show ~./hax list groups~ and ~./hax list mutations~
+to demonstrate discoverability.
+
+Mention haxgoat has 15 endpoints covering all five predicate groups.
+It is a deliberately vulnerable target, like OWASP Juice Shop but
+purpose-built for hax.
+
+* Slide 5: Five Predicate Groups
+
+** Content
+
+- Table or grid layout:
+
+| Group | Predicates | Mutations Used |
+|-------|-----------|----------------|
+| *Headers* | CSP, HSTS, SameSite, CORP, X-Frame-Options, X-Content-Type-Options, Permissions-Policy | header-omit, header-corrupt |
+| *Methods* | Idempotency, safety, retries | method-rotate, repeat-N |
+| *Cross-Origin* | CSRF, CORS reflection, JSONP callback, open redirect | origin-cross-site, header-forge, method-rotate |
+| *Cache* | ETag round-trip, no-store, Vary, 304 | repeat-N |
+| *State* | Workflow skip, TOCTOU, replay | repeat-N, repeat-concurrent |
+
+** Speaker Notes
+
+Walk through each group briefly. Key points per group:
+
+Headers: These are Type 1 (universal) properties — they must hold for
+every response. A single GET is enough to verify. This is where most
+AI-generated code fails.
+
+Methods: Type 2 (relational) — we need to compare responses across
+different HTTP methods. PUT should be idempotent. GET should be safe.
+
+Cross-Origin: Type 2 — we inject a cross-site Origin and check if
+the server reflects it. CORS misconfiguration is the #1 finding in
+real audits.
+
+Cache: Type 2 — we replay requests and check for ETag, Vary, 304
+behavior. Subtle but critical for API correctness.
+
+State: Type 3 (temporal) — we need multiple requests in sequence.
+Workflow-skip tests if you can jump to step 3 without doing step 1.
+TOCTOU tests race conditions.
+
+* Slide 6: Mutation Vocabulary
+
+** Content
+
+- Visual: mutation operators as transformations
+- Table:
+
+| Operator | What it does | Example |
+|----------|-------------|---------|
+| header-omit | Remove a required header | Drop Authorization |
+| header-corrupt | Malform a header value | CSP: "unsafe-inline unsafe-eval *" |
+| header-forge | Inject forged headers | X-Forwarded-For: 127.0.0.1 |
+| method-rotate | Cycle through HTTP methods | GET -> PUT -> DELETE |
+| origin-cross-site | Set adversarial Origin | Origin: https://evil.example.com |
+| origin-same-site | Set same-site Origin | Origin: https://target.example.com |
+| repeat-N | Replay request N times | Send same POST 10 times |
+| repeat-concurrent | Concurrent replay | 10 goroutines, same request |
+
+** Speaker Notes
+
+The mutation vocabulary is the key differentiator from scanners.
+Scanners send known-bad payloads (signature matching). Fuzzers send
+random bytes. hax sends structurally valid but adversarial HTTP —
+the kind of request a real attacker would craft.
+
+Each mutation is drawn from RFC semantics. method-rotate tests
+RFC 9110 Section 9 (method properties). header-omit tests whether
+the server degrades gracefully when expected headers are absent.
+
+The vocabulary is extensible. We plan to add: body-corrupt,
+query-inject, path-traverse, cookie-replay.
+
+* Slide 7: Property-Based Testing Framing
+
+** Content
+
+- Headline: "QuickCheck for HTTP"
+- Three property types:
+  1. *Universal* (Type 1): Every response must have CSP. Single-response check.
+  2. *Relational* (Type 2): Cross-origin request should not reflect Origin in ACAO. Request-response pair.
+  3. *Temporal* (Type 3): Replayed request should be idempotent. Multi-request sequence.
+- Formal notation:
+  #+begin_example
+  forall r in RequestVariants(mutation, target):
+    P(execute(r)) = pass | fail | warn | skip
+  #+end_example
+- Key comparison table:
+
+| | QuickCheck | Hypothesis | hax |
+|---|-----------|-----------|-----|
+| Domain | Pure functions | Python functions | HTTP servers |
+| Generators | Arbitrary | Strategies | Axis sampling |
+| Properties | Boolean predicates | Boolean predicates | RFC predicates |
+| Shrinking | Structural | Structural | Hegel-based |
+
+** Speaker Notes
+
+This is the conceptual slide for the PL/testing audience. The key
+insight: HTTP compliance is a property-testing problem, not a
+scanning problem.
+
+Property-based testing asks: "Does this property hold for all generated
+inputs?" Scanning asks: "Does this known-bad input trigger a known-bad
+response?" The former finds novel violations; the latter finds known
+vulnerabilities.
+
+Mention Hegel-based shrinking briefly: when a test fails, we simplify
+the request (remove headers, simplify method, reduce repeats) until
+we find the minimal failing case. Named "Hegel-based" because it follows
+a thesis-antithesis-synthesis dialectic.
+
+* Slide 8: OWASP Coverage Mapping
+
+** Content
+
+- Visual: OWASP coverage infographic (image prompt #2)
+- Strong coverage (green):
+  - A01 Broken Access Control — method-rotate, origin-*, workflow-skip
+  - A04 Insecure Design — all predicate groups (design-level properties)
+  - A05 Security Misconfiguration — header checks, CORS, cache
+- Partial coverage (amber):
+  - A02 Cryptographic Failures — HSTS check (transport), no crypto audit
+  - A03 Injection — header-forge, but no SQL/XSS payload testing
+  - A07 Auth Failures — auth context rotation, but no credential testing
+- Not targeted (gray):
+  - A06 Vulnerable Components — out of scope (SCA tools)
+  - A08 Software/Data Integrity — out of scope (supply chain)
+  - A09 Logging Failures — out of scope (observability)
+  - A10 SSRF — planned but not yet implemented
+
+** Speaker Notes
+
+Be honest about scope. hax is not a replacement for a full DAST
+scanner or penetration test. It tests protocol-level axioms — the
+properties that every HTTP server must satisfy regardless of what
+its endpoints do.
+
+Strong coverage on A01/A04/A05 because these are exactly the
+protocol-level properties: access control via method and origin,
+design-level security headers, and misconfiguration checks.
+
+Partial on A02/A03/A07 because we touch these indirectly (HSTS
+covers transport security, header-forge touches injection surface,
+auth context tests access control) but we do not do deep payload
+testing.
+
+Not targeted on A06/A08/A09 because these require different tooling
+(SCA, SBOM, log analysis). A10 SSRF is on the roadmap.
+
+* Slide 9: Benchmarks
+
+** Content
+
+- Headline: "21,000 checks per second"
+- Performance data:
+  - 18 predicates x 8 mutations x ~150 request variants = ~21,600 checks
+  - Single binary, zero dependencies, Go stdlib only
+  - Concurrent execution via goroutines
+  - Memory: ~15 MB RSS for a full audit run
+- Comparison:
+  - nuclei: signature-based, thousands of templates, slower per-finding
+  - ZAP: full proxy, heavy setup, minutes per scan
+  - hax: sub-second audit, single binary, CI-friendly
+- CI/CD integration:
+  #+begin_example
+  ./hax --json audit $TARGET | jq '.failures | length' | xargs test 0 -eq
+  #+end_example
+
+** Speaker Notes
+
+Speed matters for CI/CD adoption. If your security check takes
+5 minutes, developers skip it. hax runs in under a second for a
+standard audit, making it practical as a pre-merge gate.
+
+The zero-dependency design is deliberate: no OpenSSL, no libcurl,
+no node_modules. The binary is ~8 MB and cross-compiles to
+linux/darwin on amd64/arm64. Drop it into any Docker image.
+
+Mention that the 21K number is local checks per second; network
+latency dominates in real audits. But even against a remote target,
+a full audit completes in seconds because we batch intelligently
+and the predicate checks are pure functions on response data.
+
+* Slide 10: What's Next
+
+** Content
+
+- Roadmap items:
+  1. *Shrink improvements* — Better minimal failing cases via Hegel dialectic refinement
+  2. *Relevance matrix routing* — Intelligent mutation-to-predicate routing to reduce test space
+  3. *OpenAPI integration* — Optional: if a spec exists, use it to generate smarter path lists
+  4. *SSRF predicate group* — New group targeting A10
+  5. *Body mutations* — body-corrupt, body-empty, body-oversized
+  6. *Report generation* — HTML/PDF compliance reports
+  7. *Agent mode* — MCP server for AI-assisted security auditing
+- Call to action:
+  - GitHub: github.com/aygp-dr/http-axiom
+  - Try it: ~./hax audit https://your-app.example.com~
+  - Contribute: predicate PRs welcome
+
+** Speaker Notes
+
+End with forward momentum. The relevance matrix is the most
+architecturally interesting upcoming feature: it constrains which
+mutations are relevant to which predicate groups, dramatically
+reducing the test space without missing real findings.
+
+Agent mode / MCP integration is the forward-looking item for the
+AI audience: imagine an AI coding assistant that automatically runs
+hax against every HTTP endpoint it generates, before the code is
+even committed.
+
+Close with the call to action. The tool is MIT licensed, zero deps,
+and welcomes contributions — especially new predicates grounded in
+RFCs or OWASP guidelines.
+
+* Appendix: Slide Design Notes
+
+** Color Palette
+
+| Element | Color | Hex |
+|---------|-------|-----|
+| Generator / Mutations | Purple | #534ab7 |
+| Relevance Matrix | Amber | #b87a2a |
+| Predicates | Teal | #0f6e56 |
+| Oracle / Verdict | Gray | #5f5e5a |
+| Pass | Green | #4CAF50 |
+| Fail | Red | #f44336 |
+| Background | Dark navy | #1a1a2e |
+
+** Font Recommendations
+
+- Headings: Inter or IBM Plex Sans (bold)
+- Code: JetBrains Mono or Fira Code
+- Body: Inter or Source Sans Pro
+
+** Image Assets
+
+See ~docs/image-prompts.org~ for generation prompts.
+See ~docs/images/~ for generated assets.
