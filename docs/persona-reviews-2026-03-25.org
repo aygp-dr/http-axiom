@@ -97,7 +97,7 @@ GET safety) go beyond header scanning — but those are the ones that are stubs.
 |---------+--------+--------|
 | Use ~flag.FlagSet~ per command | Go purist, all | Replace hand-written parsing |
 | Remove or implement stub predicates | CISO, PBT, DevOps | Don't advertise "skip" |
-| Add ~rapid~ for real PBT | PBT researcher | Generate from large spaces, proper shrink |
+| Add Hegel for real PBT | PBT researcher | Generate from large spaces, proper shrink |
 | NDJSON pipe contract | Go purist | Enable streaming pipelines |
 | Structured remediation output | AI agent | ~hax remediate~ with framework snippets |
 | ~hax manifest~ for pre-generation | AI agent | Export predicate knowledge as context |
@@ -112,7 +112,7 @@ GET safety) go beyond header scanning — but those are the ones that are stubs.
 | Finding | Source | Why reject |
 |---------+--------+------------|
 | "This is a header checker with aspirations" | CISO | Correct for v1; v2 implements the aspirations |
-| "Not PBT, just structured enumeration" | PBT researcher | Fair for v1; ~rapid~ integration makes it real PBT |
+| "Not PBT, just structured enumeration" | PBT researcher | Fair for v1; Hegel integration makes it real PBT |
 | "Should be infrastructure, not application" | CISO | Both — hax tests the *deployed result* regardless of where headers are set |
 | "Just use ZAP" | CISO, DevOps | Complementary, not competitive — hax tests invariants ZAP doesn't |
 
@@ -120,7 +120,7 @@ GET safety) go beyond header scanning — but those are the ones that are stubs.
 
 | Finding | Source | When |
 |---------+--------+------|
-| Stateful PBT (RuleBasedStateMachine) | PBT researcher | v3 — requires ~rapid.MakeMachine~ |
+| Stateful PBT (RuleBasedStateMachine) | PBT researcher | v3 — requires Hegel stateful extension |
 | MCP server mode | AI agent | v2 — after core predicates work |
 | Docker image | DevOps | After rebuild stabilizes |
 | Coverage-guided generation | PBT researcher | Research — integration with instrumentation |
@@ -134,7 +134,7 @@ The reviews converge on an identity question. hax is NOT:
 
 hax IS:
 - A *specification testing tool* for HTTP protocol properties
-- A *property-based testing framework* for RFC invariants (once ~rapid~ is integrated)
+- A *property-based testing framework* for RFC invariants (once Hegel is integrated)
 - A *verification gate* for AI-generated code
 - A *pre-generation knowledge source* for AI agents
 
@@ -145,9 +145,24 @@ not "security scanning."
 
 ** P0: Core identity (must have for v2 to be v2)
 
-- ~rapid~ integration for real PBT generation + shrinking
+- [[https://hegel.dev][Hegel]] integration for real PBT generation + shrinking (NOT rapid — this project builds on Hegel core)
 - ~flag.FlagSet~ per command (stdlib, prevents all 5 CLI bugs)
 - Remove stub predicates from public interface (don't advertise "skip")
+
+** Anti-Goals for Rebuild
+
+These are explicitly NOT goals for the rebuild. They are tracked as P4
+beads in this repo for future work but must not distract from P0-P2.
+
+- SARIF / JUnit output formats (adoption polish, not identity)
+- Config file / suppression / baselining (enterprise feature)
+- Auth credential injection (real but deferred)
+- Docker image / GitHub Actions (CI integration)
+- NDJSON streaming (pipe optimization)
+- Rate limiting / scope control (scale features)
+- MCP server mode (integration feature)
+- Stateful PBT / coverage-guided generation (research-grade)
+- ~rapid~ (wrong library — this project uses Hegel, not rapid)
 
 ** P1: Primary user value (AI agents are the user)
 
@@ -180,7 +195,7 @@ not for the tool's identity or correctness. Defer until the core
 - Scope control (~--include~, ~--exclude~ paths)
 - ~internal/output~ presentation tier refinement
 - MCP server mode (~hax serve --mcp~)
-- Stateful PBT via ~rapid.MakeMachine~
+- Stateful PBT via Hegel stateful extension
 - Coverage-guided generation
 - Defect Dojo / SIEM integration formats
 
