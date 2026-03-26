@@ -120,6 +120,24 @@ func isHelpFlag(s string) bool {
 	return s == "-h" || s == "--help" || s == "help"
 }
 
+// stripGlobalFlags removes --json and -V/--verbose from args, setting the
+// global flags. Returns remaining args. This allows global flags to appear
+// anywhere in the command line.
+func stripGlobalFlags(args []string) []string {
+	var remaining []string
+	for _, arg := range args {
+		switch arg {
+		case "--json":
+			jsonOutput = true
+		case "-V", "--verbose":
+			verboseMode = true
+		default:
+			remaining = append(remaining, arg)
+		}
+	}
+	return remaining
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -146,6 +164,8 @@ Flags:
 `)
 		return
 	}
+
+	args = stripGlobalFlags(args)
 
 	methods := "GET,POST,PUT,DELETE,PATCH,HEAD,OPTIONS"
 	paths := "/"
@@ -254,6 +274,8 @@ Flags:
 `)
 		return
 	}
+
+	args = stripGlobalFlags(args)
 
 	// Parse flags.
 	operatorList := ""
@@ -384,6 +406,8 @@ Flags:
 `)
 		return
 	}
+
+	args = stripGlobalFlags(args)
 
 	// Parse flags.
 	url := targetURL
@@ -609,6 +633,8 @@ Flags:
 		return
 	}
 
+	args = stripGlobalFlags(args)
+
 	fmt.Fprintf(os.Stderr, "hax run: not yet implemented\n")
 	os.Exit(1)
 }
@@ -631,6 +657,8 @@ Flags:
 `)
 		return
 	}
+
+	args = stripGlobalFlags(args)
 
 	what := "groups"
 	if len(args) > 0 {
@@ -731,6 +759,8 @@ Flags:
 `)
 		return
 	}
+
+	args = stripGlobalFlags(args)
 
 	url := targetURL
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -835,6 +865,8 @@ Flags:
 		return
 	}
 
+	args = stripGlobalFlags(args)
+
 	fmt.Fprintf(os.Stderr, "hax shrink: not yet implemented\n")
 	os.Exit(1)
 }
@@ -854,6 +886,8 @@ Checks:
 `)
 		return
 	}
+
+	args = stripGlobalFlags(args)
 
 	fmt.Println("hax doctor")
 	fmt.Println()
