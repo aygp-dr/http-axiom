@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/aygp-dr/http-axiom/internal/predicate"
+	"github.com/aygp-dr/http-axiom/internal/request"
 )
 
 func TestJudge_CountsCorrectly(t *testing.T) {
@@ -127,5 +128,352 @@ func TestDefaultShrinkConfig(t *testing.T) {
 	}
 	if cfg.MaxAttempts != 50 {
 		t.Errorf("DefaultShrinkConfig().MaxAttempts = %d, want 50", cfg.MaxAttempts)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shrink tests
+// ---------------------------------------------------------------------------
+
+// TestShrink_RemovesHeadersToMinimum verifies that Shrink removes headers
+// down to the minimum set that still causes a failure.
+// The mock check function fails when the request has >2 headers.
+func TestShrink_RemovesHeadersToMinimum(t *testing.T) {
+	original := request.Request{
+		Method: "GET",
+		Path:   "/",
+		Headers: map[string]string{
+			"X-A": "1",
+			"X-B": "2",
+			"X-C": "3",
+			"X-D": "4",
+			"X-E": "5",
+		},
+	}
+
+	// Fails when header count > 2.
+	check := func(req request.Request) (predicate.Result, error) {
+		if len(req.Headers) > 2 {
+			return predicate.Result{
+				Group:  "headers",
+				Name:   "too-many-headers",
+				Status: "fail",
+				Detail: "more than 2 headers",
+			}, nil
+		}
+		return predicate.Result{Status: "pass"}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	if len(result.Shrunk.Headers) != 3 {
+		t.Errorf("Shrunk headers count = %d, want 3 (minimum that still fails)", len(result.Shrunk.Headers))
+	}
+	if result.Steps == 0 {
+		t.Error("Steps = 0, expected at least one shrink step")
+	}
+	if result.Steps != 2 {
+		t.Errorf("Steps = %d, want 2 (removed 2 headers from 5 to 3)", result.Steps)
+	}
+	if result.Predicate != "too-many-headers" {
+		t.Errorf("Predicate = %q, want %q", result.Predicate, "too-many-headers")
+	}
+	if result.Group != "headers" {
+		t.Errorf("Group = %q, want %q", result.Group, "headers")
+	}
+}
+
+// TestShrink_TerminatesWhenNothingToRemove verifies that Shrink stops
+// when the request is already minimal and no simplification preserves failure.
+func TestShrink_TerminatesWhenNothingToRemove(t *testing.T) {
+	original := request.Request{
+		Method: "GET",
+		Path:   "/",
+		Headers: map[string]string{
+			"X-Required": "yes",
+		},
+	}
+
+	// Fails only when X-Required header is present.
+	check := func(req request.Request) (predicate.Result, error) {
+		if _, ok := req.Headers["X-Required"]; ok {
+			return predicate.Result{
+				Group:  "headers",
+				Name:   "required-header",
+				Status: "fail",
+			}, nil
+		}
+		return predicate.Result{Status: "pass"}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	// The header can't be removed (failure goes away), and there's nothing
+	// else to simplify, so steps should be 0.
+	if result.Steps != 0 {
+		t.Errorf("Steps = %d, want 0 (already minimal)", result.Steps)
+	}
+	if len(result.Shrunk.Headers) != 1 {
+		t.Errorf("Shrunk headers count = %d, want 1", len(result.Shrunk.Headers))
+	}
+	if result.Shrunk.Headers["X-Required"] != "yes" {
+		t.Error("X-Required header should be preserved")
+	}
+}
+
+// TestShrink_MaxAttemptsLimitsIterations verifies that MaxAttempts bounds
+// the number of outer loop iterations.
+func TestShrink_MaxAttemptsLimitsIterations(t *testing.T) {
+	original := request.Request{
+		Method: "POST",
+		Path:   "/",
+		Headers: map[string]string{
+			"X-A": "1",
+			"X-B": "2",
+			"X-C": "3",
+			"X-D": "4",
+			"X-E": "5",
+			"X-F": "6",
+			"X-G": "7",
+			"X-H": "8",
+		},
+		Auth:   "bearer",
+		Origin: "cross-site",
+		Repeat: 5,
+	}
+
+	// Always fails, so every simplification will be accepted.
+	check := func(req request.Request) (predicate.Result, error) {
+		return predicate.Result{
+			Group:  "headers",
+			Name:   "always-fails",
+			Status: "fail",
+		}, nil
+	}
+
+	cfg := ShrinkConfig{MaxAttempts: 3, Enabled: true}
+	result := Shrink(cfg, original, check)
+
+	// With MaxAttempts=3, only 3 outer iterations run. Each iteration
+	// makes one change (removes a header in this case), so steps <= 3.
+	if result.Steps > 3 {
+		t.Errorf("Steps = %d, want <= 3 with MaxAttempts=3", result.Steps)
+	}
+	if result.Steps == 0 {
+		t.Error("Steps = 0, expected some shrink steps")
+	}
+}
+
+// TestShrink_SimplifiesAuth verifies auth simplification down the ladder.
+func TestShrink_SimplifiesAuth(t *testing.T) {
+	original := request.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{},
+		Auth:    "bearer",
+	}
+
+	// Fails regardless of auth.
+	check := func(req request.Request) (predicate.Result, error) {
+		return predicate.Result{
+			Group:  "headers",
+			Name:   "auth-test",
+			Status: "fail",
+		}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	// Auth should be simplified from bearer -> basic -> cookie -> none (empty).
+	if result.Shrunk.Auth != "" {
+		t.Errorf("Shrunk.Auth = %q, want empty (fully simplified)", result.Shrunk.Auth)
+	}
+	if result.Steps < 1 {
+		t.Errorf("Steps = %d, want >= 1", result.Steps)
+	}
+}
+
+// TestShrink_SimplifiesOrigin verifies origin simplification.
+func TestShrink_SimplifiesOrigin(t *testing.T) {
+	original := request.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{},
+		Origin:  "cross-site",
+	}
+
+	// Fails regardless of origin.
+	check := func(req request.Request) (predicate.Result, error) {
+		return predicate.Result{
+			Group:  "cross-origin",
+			Name:   "origin-test",
+			Status: "fail",
+		}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	if result.Shrunk.Origin != "" {
+		t.Errorf("Shrunk.Origin = %q, want empty (fully simplified)", result.Shrunk.Origin)
+	}
+}
+
+// TestShrink_SimplifiesMethod verifies method simplification to GET.
+func TestShrink_SimplifiesMethod(t *testing.T) {
+	original := request.Request{
+		Method:  "DELETE",
+		Path:    "/",
+		Headers: map[string]string{},
+	}
+
+	// Fails regardless of method.
+	check := func(req request.Request) (predicate.Result, error) {
+		return predicate.Result{
+			Group:  "methods",
+			Name:   "method-test",
+			Status: "fail",
+		}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	if result.Shrunk.Method != "GET" {
+		t.Errorf("Shrunk.Method = %q, want GET", result.Shrunk.Method)
+	}
+}
+
+// TestShrink_ReducesRepeat verifies repeat count reduction.
+func TestShrink_ReducesRepeat(t *testing.T) {
+	original := request.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{},
+		Repeat:  5,
+	}
+
+	// Fails when repeat >= 2.
+	check := func(req request.Request) (predicate.Result, error) {
+		if req.Repeat >= 2 {
+			return predicate.Result{
+				Group:  "state",
+				Name:   "repeat-test",
+				Status: "fail",
+			}, nil
+		}
+		return predicate.Result{Status: "pass"}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	if result.Shrunk.Repeat != 2 {
+		t.Errorf("Shrunk.Repeat = %d, want 2 (minimum that still fails)", result.Shrunk.Repeat)
+	}
+}
+
+// TestShrink_OriginalDoesNotFail verifies that if the original request
+// does not fail, Shrink returns it unchanged with 0 steps.
+func TestShrink_OriginalDoesNotFail(t *testing.T) {
+	original := request.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{"X-A": "1"},
+	}
+
+	check := func(req request.Request) (predicate.Result, error) {
+		return predicate.Result{Status: "pass"}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	if result.Steps != 0 {
+		t.Errorf("Steps = %d, want 0 (original doesn't fail)", result.Steps)
+	}
+	if len(result.Shrunk.Headers) != 1 {
+		t.Errorf("Shrunk headers should be unchanged")
+	}
+}
+
+// TestShrink_FullSimplification verifies combined simplification across
+// all dimensions when everything can be stripped.
+func TestShrink_FullSimplification(t *testing.T) {
+	original := request.Request{
+		Method: "POST",
+		Path:   "/api/test",
+		Headers: map[string]string{
+			"X-A": "1",
+			"X-B": "2",
+		},
+		Auth:   "bearer",
+		Origin: "cross-site",
+		Repeat: 3,
+	}
+
+	// Always fails: everything can be simplified.
+	check := func(req request.Request) (predicate.Result, error) {
+		return predicate.Result{
+			Group:  "headers",
+			Name:   "always-fails",
+			Status: "fail",
+		}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	if len(result.Shrunk.Headers) != 0 {
+		t.Errorf("Shrunk headers = %d, want 0 (all removable)", len(result.Shrunk.Headers))
+	}
+	if result.Shrunk.Auth != "" {
+		t.Errorf("Shrunk.Auth = %q, want empty", result.Shrunk.Auth)
+	}
+	if result.Shrunk.Origin != "" {
+		t.Errorf("Shrunk.Origin = %q, want empty", result.Shrunk.Origin)
+	}
+	if result.Shrunk.Method != "GET" {
+		t.Errorf("Shrunk.Method = %q, want GET", result.Shrunk.Method)
+	}
+	if result.Shrunk.Repeat > 1 {
+		t.Errorf("Shrunk.Repeat = %d, want <= 1 (fully simplified)", result.Shrunk.Repeat)
+	}
+	if result.Steps < 1 {
+		t.Errorf("Steps = %d, want >= 1", result.Steps)
+	}
+}
+
+// TestCopyRequest verifies deep copy of request headers.
+func TestCopyRequest(t *testing.T) {
+	original := request.Request{
+		Method: "GET",
+		Path:   "/",
+		Headers: map[string]string{
+			"X-A": "1",
+			"X-B": "2",
+		},
+		Auth:   "bearer",
+		Origin: "cross-site",
+	}
+
+	cp := copyRequest(original)
+
+	// Modify the copy's headers.
+	cp.Headers["X-C"] = "3"
+	delete(cp.Headers, "X-A")
+
+	// Original should be unchanged.
+	if _, ok := original.Headers["X-A"]; !ok {
+		t.Error("Modifying copy affected original: X-A deleted")
+	}
+	if _, ok := original.Headers["X-C"]; ok {
+		t.Error("Modifying copy affected original: X-C appeared")
+	}
+	if len(original.Headers) != 2 {
+		t.Errorf("Original headers = %d, want 2", len(original.Headers))
 	}
 }
