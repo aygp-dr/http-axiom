@@ -140,3 +140,52 @@ hax IS:
 
 The rebuild should lead with "RFC compliance via property-based testing"
 not "security scanning."
+
+* Priority Tiers for Rebuild
+
+** P0: Core identity (must have for v2 to be v2)
+
+- ~rapid~ integration for real PBT generation + shrinking
+- ~flag.FlagSet~ per command (stdlib, prevents all 5 CLI bugs)
+- Remove stub predicates from public interface (don't advertise "skip")
+
+** P1: Primary user value (AI agents are the user)
+
+- ~hax manifest~ — export predicate knowledge as structured pre-generation context
+- ~hax remediate~ — framework-specific fix snippets per finding
+- Wire relevance matrix into cmdRun (stop testing 280 nonsense combinations)
+
+** P2: Correctness (contract violations from audit)
+
+- Fix V2: close all ~Responses[]~ not just ~[0]~
+- Fix V3: close doctor HEAD response
+- Fix V4: relevance matrix dead code (overlaps with P1)
+- Explicit predicate Type enforcement (no Fn+MultiFn ambiguity)
+
+** P3: Pipeline adoption (nice to have, not core)
+
+Everything below is polish. It matters for enterprise adoption but
+not for the tool's identity or correctness. Defer until the core
+(P0-P2) is solid.
+
+- SARIF output format (~--format sarif~)
+- JUnit XML output (~--format junit~)
+- Config file (~.haxrc~ / ~hax.yaml~) with per-predicate suppression
+- False-positive baselining (~hax baseline~ command)
+- Real auth credential injection (~--header~, ~--bearer-token~, env vars)
+- Docker image (multi-stage, scratch-based)
+- GitHub Actions workflow template
+- NDJSON pipe contract for streaming
+- Rate limiting / throttling controls
+- Scope control (~--include~, ~--exclude~ paths)
+- ~internal/output~ presentation tier refinement
+- MCP server mode (~hax serve --mcp~)
+- Stateful PBT via ~rapid.MakeMachine~
+- Coverage-guided generation
+- Defect Dojo / SIEM integration formats
+
+These are all valid requirements from the CISO and DevOps reviews.
+They are not rejected — they are *deferred* because they are adoption
+features, not identity features. A tool that does real PBT over RFC
+specs with remediation output for AI agents does not need SARIF to
+justify its existence. SARIF helps it *scale*. The core must work first.
