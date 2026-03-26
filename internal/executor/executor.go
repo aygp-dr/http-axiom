@@ -4,6 +4,7 @@ package executor
 
 import (
 	"encoding/base64"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,6 +29,18 @@ type Result struct {
 	Responses []*http.Response // all responses for repeat-N/concurrent
 	Duration  time.Duration    // total execution time
 	Err       error            // nil on success
+}
+
+// CloseResponses drains and closes ALL response bodies in Responses.
+// This satisfies the contract: "Caller MUST close ALL response bodies
+// in executor.Result.Responses (not just [0])".
+func (r *Result) CloseResponses() {
+	for _, resp := range r.Responses {
+		if resp != nil && resp.Body != nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -110,7 +123,12 @@ func ExecuteBatch(cfg Config, reqs []request.Request) []Result {
 func doRequest(client *http.Client, cfg Config, req request.Request) (*http.Response, error) {
 	fullURL := strings.TrimRight(cfg.BaseURL, "/") + req.Path
 
-	httpReq, err := http.NewRequest(req.Method, fullURL, nil)
+	var body io.Reader
+	if req.Body != "" {
+		body = strings.NewReader(req.Body)
+	}
+
+	httpReq, err := http.NewRequest(req.Method, fullURL, body)
 	if err != nil {
 		return nil, err
 	}

@@ -103,6 +103,7 @@ func originCrossSiteMutator(r request.Request) request.Request {
 
 // originSameSiteMutator sets a same-site Origin header.
 func originSameSiteMutator(r request.Request) request.Request {
+	r.Headers = copyHeaders(r.Headers)
 	r.Origin = "same-site"
 	return r
 }

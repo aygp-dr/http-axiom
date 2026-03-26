@@ -16,6 +16,7 @@ import (
 	"github.com/aygp-dr/http-axiom/internal/oracle"
 	"github.com/aygp-dr/http-axiom/internal/output"
 	"github.com/aygp-dr/http-axiom/internal/predicate"
+	"github.com/aygp-dr/http-axiom/internal/relevance"
 	"github.com/aygp-dr/http-axiom/internal/request"
 )
 
@@ -546,8 +547,7 @@ Flags:
 				os.Exit(1)
 			}
 			groupResults := predicate.Run(group, result.Response)
-			io.Copy(io.Discard, result.Response.Body)
-			result.Response.Body.Close()
+			result.CloseResponses()
 			allResults = append(allResults, groupResults...)
 		}
 
@@ -743,11 +743,15 @@ Flags:
 	// ---------------------------------------------------------------
 	// 3. Mutate
 	// ---------------------------------------------------------------
-	var mutated []request.Request
+	type taggedRequest struct {
+		Req      request.Request
+		Operator string // which mutation operator was applied
+	}
+	var mutated []taggedRequest
 	for _, req := range requests {
 		for _, op := range operators {
 			m := mutation.Apply(req, []string{op})
-			mutated = append(mutated, m)
+			mutated = append(mutated, taggedRequest{Req: m, Operator: op})
 		}
 	}
 
@@ -767,10 +771,12 @@ Flags:
 	total := len(mutated)
 	stopped := false
 
-	for idx, req := range mutated {
+	for idx, tagged := range mutated {
 		if stopped {
 			break
 		}
+
+		req := tagged.Req
 
 		// Execute the request.
 		result := executor.Execute(execCfg, req)
@@ -786,14 +792,16 @@ Flags:
 			continue
 		}
 
-		// Drain and close the response body so connections can be reused.
-		if result.Response != nil {
-			io.Copy(io.Discard, result.Response.Body)
-			result.Response.Body.Close()
-		}
+		// Drain and close ALL response bodies so connections can be reused.
+		// For repeat-N/concurrent, Responses may contain multiple entries.
+		result.CloseResponses()
 
-		// Run each selected predicate group against the response.
-		for _, group := range groups {
+		// Use the relevance matrix to select only groups relevant to this
+		// mutation operator, instead of running every group (C-005 fix).
+		relevantGroups := resolveRelevantGroups(tagged.Operator, groups)
+
+		// Run each relevant predicate group against the response.
+		for _, group := range relevantGroups {
 			var groupResults []predicate.Result
 
 			// Classify which predicate types this group contains.
@@ -838,8 +846,8 @@ Flags:
 			// Verbose progress output.
 			for _, r := range groupResults {
 				if verboseMode {
-					fmt.Fprintf(os.Stderr, "[%d/%d] %s %s -> %s: %s=%s (%s)\n",
-						idx+1, total, req.Method, req.Path,
+					fmt.Fprintf(os.Stderr, "[%d/%d] %s %s [%s] -> %s: %s=%s (%s)\n",
+						idx+1, total, req.Method, req.Path, tagged.Operator,
 						r.Group, r.Name, r.Status, result.Duration)
 				}
 			}
@@ -889,6 +897,34 @@ Flags:
 	if verdict.Status == "fail" {
 		os.Exit(1)
 	}
+}
+
+// resolveRelevantGroups returns only the predicate groups that are relevant
+// for the given mutation operator, filtered against the user-selected groups.
+// This uses the relevance matrix to avoid running every group for every mutation.
+func resolveRelevantGroups(operator string, selectedGroups []predicate.Group) []predicate.Group {
+	cases := relevance.ForMutation(operator)
+	if len(cases) == 0 {
+		// Unknown operator (shouldn't happen) — fall back to all selected groups.
+		return selectedGroups
+	}
+
+	// Collect the set of relevant group names from the matrix.
+	relevant := make(map[string]bool)
+	for _, tc := range cases {
+		for _, g := range tc.Groups {
+			relevant[g] = true
+		}
+	}
+
+	// Filter selectedGroups to only those in the relevant set.
+	var out []predicate.Group
+	for _, g := range selectedGroups {
+		if relevant[g.Name] {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // cmdList enumerates available predicates, mutations, or groups.
@@ -1046,9 +1082,8 @@ Flags:
 	}
 
 	resp := result.Response
-	defer resp.Body.Close()
-	// Discard the body so the connection can be reused.
-	io.Copy(io.Discard, resp.Body)
+	// Close ALL response bodies (not just [0]) so connections can be reused.
+	defer result.CloseResponses()
 
 	// Run all predicate groups against the response.
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -1232,6 +1267,7 @@ Examples:
 	checkFn := func(r request.Request) (predicate.Result, error) {
 		r.BaseURL = url
 		result := executor.Execute(execCfg, r)
+		defer result.CloseResponses()
 		if result.Err != nil {
 			return predicate.Result{}, result.Err
 		}

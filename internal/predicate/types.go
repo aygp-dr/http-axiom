@@ -2,7 +2,10 @@
 // five categories: headers, methods, cross-origin, cache, state.
 package predicate
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 // Predicate type constants classify each named predicate by the shape
 // of the function required to evaluate it.
@@ -53,6 +56,63 @@ type NamedPred struct {
 	ReqFn   RequestResponsePredicate // request+response (new, nil if unused)
 	MultiFn MultiPredicate           // multi-request (new, nil if unused)
 	Type    int                      // TypeUniversal, TypeRelational, or TypeSequential
+}
+
+// Validate checks the NamedPred invariant: exactly one function field
+// is set, and it must match the Type tag.
+//
+//	TypeUniversal  -> Fn set, ReqFn and MultiFn nil
+//	TypeRelational -> ReqFn set, Fn and MultiFn nil
+//	TypeSequential -> MultiFn set, Fn and ReqFn nil
+func (p NamedPred) Validate() error {
+	switch p.Type {
+	case TypeUniversal:
+		if p.Fn == nil {
+			return fmt.Errorf("predicate %q: Type=Universal but Fn is nil", p.Name)
+		}
+		if p.ReqFn != nil {
+			return fmt.Errorf("predicate %q: Type=Universal but ReqFn is set (must be nil)", p.Name)
+		}
+		if p.MultiFn != nil {
+			return fmt.Errorf("predicate %q: Type=Universal but MultiFn is set (must be nil)", p.Name)
+		}
+	case TypeRelational:
+		if p.ReqFn == nil {
+			return fmt.Errorf("predicate %q: Type=Relational but ReqFn is nil", p.Name)
+		}
+		if p.Fn != nil {
+			return fmt.Errorf("predicate %q: Type=Relational but Fn is set (must be nil)", p.Name)
+		}
+		if p.MultiFn != nil {
+			return fmt.Errorf("predicate %q: Type=Relational but MultiFn is set (must be nil)", p.Name)
+		}
+	case TypeSequential:
+		if p.MultiFn == nil {
+			return fmt.Errorf("predicate %q: Type=Sequential but MultiFn is nil", p.Name)
+		}
+		if p.Fn != nil {
+			return fmt.Errorf("predicate %q: Type=Sequential but Fn is set (must be nil)", p.Name)
+		}
+		if p.ReqFn != nil {
+			return fmt.Errorf("predicate %q: Type=Sequential but ReqFn is set (must be nil)", p.Name)
+		}
+	default:
+		return fmt.Errorf("predicate %q: unknown Type=%d", p.Name, p.Type)
+	}
+	return nil
+}
+
+// ValidateAll checks every predicate in every group returned by AllGroups().
+// Returns the first validation error found, or nil if all predicates are valid.
+func ValidateAll() error {
+	for _, group := range AllGroups() {
+		for _, pred := range group.Predicates {
+			if err := pred.Validate(); err != nil {
+				return fmt.Errorf("group %q: %w", group.Name, err)
+			}
+		}
+	}
+	return nil
 }
 
 // AllGroups returns every predicate group.

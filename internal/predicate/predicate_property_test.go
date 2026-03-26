@@ -112,6 +112,15 @@ func TestProperty_AllGroupsNonEmpty(t *testing.T) {
 	})
 }
 
+// TestAllPredicatesValid calls ValidateAll() to machine-check the NamedPred
+// invariant: for every predicate, exactly one function field is set and it
+// matches the Type tag. This enforces C-014.
+func TestAllPredicatesValid(t *testing.T) {
+	if err := ValidateAll(); err != nil {
+		t.Fatalf("ValidateAll() failed: %v", err)
+	}
+}
+
 // TestProperty_GroupNamesMatchAllGroups verifies that GroupNames() returns
 // exactly the names from AllGroups(), in the same order.
 func TestProperty_GroupNamesMatchAllGroups(t *testing.T) {
