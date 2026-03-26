@@ -2,10 +2,11 @@
 #+AUTHOR: aygp-dr
 #+OPTIONS: toc:2 num:nil
 
+[[file:images/output/01-pipeline-hero_banner.png]]
+
 [[https://img.shields.io/badge/status-experimental-orange.svg]]
 [[https://img.shields.io/badge/go-1.23+-00ADD8.svg?logo=go]]
 [[https://img.shields.io/badge/property--based%20testing-RFC%20grounded-blueviolet.svg]]
-[[https://img.shields.io/badge/deps-zero-brightgreen.svg]]
 [[https://img.shields.io/badge/license-MIT-blue.svg]]
 
 * Overview

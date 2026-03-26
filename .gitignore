@@ -13,4 +13,5 @@ model-architecture-original.svg
 .githooks/
 
 # Generated images (regenerate with: make images)
-images/output/
+images/output/*
+!images/output/01-pipeline-hero_banner.png

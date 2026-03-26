@@ -213,6 +213,13 @@ SOURCE_IMGS  := $(foreach n,$(PROMPT_NAMES),$(IMGOUT)/$(n)_$(OLLAMA_SLUG)_s$(OLL
 DERIVED_SUFFIXES := _banner _og _twitter _thumb _favicon
 DERIVED_IMGS := $(foreach src,$(SOURCE_IMGS),$(foreach sfx,$(DERIVED_SUFFIXES),$(basename $(src))$(sfx).png))
 
+# The README banner: tight center crop from pipeline hero (no text)
+BANNER := $(IMGOUT)/01-pipeline-hero_banner.png
+HERO   := $(IMGOUT)/01-pipeline-hero_$(OLLAMA_SLUG)_s$(OLLAMA_SEED).png
+
+$(BANNER): $(HERO)
+	magick $< -gravity center -crop 1024x250+0+0 +repage $@
+
 # --- Derived size rules (pattern rules on existing source files) ---
 
 $(IMGOUT)/%_banner.png: $(IMGOUT)/%.png
