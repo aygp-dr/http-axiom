@@ -655,8 +655,86 @@
       "assigned_agent": "staff-engineer",
       "review_gate": "Is result recording a core CLI concern or should hax output JSON and let external tools handle persistence?"
     }
+    ,
+    {
+      "id": 36,
+      "title": "Dual dispatch: runner uses structural presence, cmdRun uses Type tag",
+      "hypothesis": "runner.go dispatches on p.Fn != nil / p.MultiFn != nil (structural), while main.go cmdCheck/cmdRun dispatches on p.Type to choose which runner to call. This dual dispatch means a NamedPred with Type=TypeSequential and both Fn+MultiFn set would run twice. Unifying dispatch to Type-only with a Validate() method on NamedPred will prevent double-execution and make the contract machine-checkable.",
+      "falsification": "If no predicate ever has both Fn and MultiFn set simultaneously (enforced by property test), the dual dispatch is redundant but harmless.",
+      "evidence": [
+        "L7 review: runner.go lines 11-19 check structural presence, main.go lines 526-535 and 800-812 check Type tag",
+        "Current stubs are safe (only Fn set, Type=Universal), but promotion to MultiFn without clearing Fn would cause double-execution",
+        "Fixed: runner.go now dispatches on p.Type instead of structural presence, unified with main.go dispatch"
+      ],
+      "status": "confirmed",
+      "tags": [
+        "architecture",
+        "predicate",
+        "dispatch",
+        "correctness"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Should runner dispatch on Type (single source of truth) or keep structural dispatch as defense-in-depth?"
+    },
+    {
+      "id": 37,
+      "title": "originSameSiteMutator does not copy headers (shared map reference)",
+      "hypothesis": "originSameSiteMutator in mutation.go:105-108 does not call copyHeaders. Since Go maps are reference types, the returned request shares the Headers map with the input. Any downstream code modifying the returned request's headers will corrupt the original. Adding copyHeaders makes it consistent with all other mutators.",
+      "falsification": "If Go value semantics on struct copy are sufficient (the mutator only writes r.Origin, never r.Headers), the shared reference is safe by construction. But a future edit adding header writes would silently break the invariant.",
+      "evidence": [
+        "L7 review: mutation.go line 105-108 is the only mutator without copyHeaders",
+        "C-008 confirmed the general principle; this is a specific gap that passed property tests by accident (no header modification in this mutator)"
+      ],
+      "status": "open",
+      "tags": [
+        "architecture",
+        "mutation",
+        "value-semantics",
+        "correctness"
+      ],
+      "assigned_agent": "code-reviewer",
+      "review_gate": "Is defensive copyHeaders necessary when the mutator provably never writes to headers?"
+    },
+    {
+      "id": 38,
+      "title": "Executor response bodies leak for Responses[1:] in repeat/concurrent paths",
+      "hypothesis": "executor.Execute stores all responses in result.Responses but callers (cmdRun main.go:791) only close result.Response (Responses[0]). For repeat-N and repeat-concurrent, Responses[1:] leak their bodies. Either executor should drain/close internally, or callers must close all.",
+      "falsification": "If Go's GC+finalizer closes the underlying TCP connections eventually, the leak is a resource delay not a correctness bug. But under load (hax run with --count 100 and repeat-5), connection exhaustion is likely.",
+      "evidence": [
+        "L7 review: CLAUDE.md contract says 'Caller MUST close ALL response bodies in executor.Result.Responses (not just [0])'",
+        "main.go:791 only closes result.Response, violating the contract"
+      ],
+      "status": "open",
+      "tags": [
+        "architecture",
+        "executor",
+        "resource-leak",
+        "correctness"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Should executor own body lifecycle (drain internally) or keep caller responsibility?"
+    },
+    {
+      "id": 39,
+      "title": "request.Request lacks Body field — pipeline and sequential predicates diverge",
+      "hypothesis": "request.Request has no Body field. The executor sends bodyless requests, but sequential predicates (checkIdempotencyMulti) create their own bodied requests bypassing the pipeline. Adding Body []byte to Request unifies the pipeline path with sequential predicates.",
+      "falsification": "If sequential predicates intentionally bypass the pipeline's request representation (they own their full HTTP lifecycle), adding Body to Request couples two intentionally separate paths.",
+      "evidence": [
+        "L7 review: executor.doRequest line 113 always passes nil body. checkIdempotencyMulti in methods.go creates strings.NewReader body directly.",
+        "hax run tests PUT idempotency via executor (bodyless) while hax check methods tests via MultiFn (bodied) — different server behavior"
+      ],
+      "status": "open",
+      "tags": [
+        "architecture",
+        "request",
+        "pipeline",
+        "type-design"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Does Body in Request unify the pipeline or couple intentionally separate paths?"
+    }
   ],
-  "next_id": 36,
+  "next_id": 40,
   "config": {
     "local": true
   }
