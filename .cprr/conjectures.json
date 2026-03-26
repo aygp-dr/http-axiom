@@ -737,8 +737,56 @@
       "assigned_agent": "staff-engineer",
       "review_gate": "Does Body in Request unify the pipeline or couple intentionally separate paths?"
     }
+    ,
+    {
+      "id": 40,
+      "title": "TLA+: Concurrent execution correctness for repeat-concurrent mutation",
+      "hypothesis": "The repeat-concurrent mutation sends N identical requests simultaneously against shared server state. The executor collects responses and the predicate aggregates results. A TLA+ spec modeling N concurrent requests with interleaved server-side state transitions will reveal whether result aggregation is order-dependent or if race conditions in the server can produce inconsistent predicate verdicts. This is TLA+'s sweet spot: exhaustive interleaving exploration that property-based testing cannot provide.",
+      "falsification": "If the executor's concurrent requests are fully independent (no shared client state, no result ordering dependency) and the predicate treats all responses equivalently, then all interleavings produce the same verdict and TLC finds no violations — the concurrency is trivially safe.",
+      "acceptance_criteria": [
+        "formal/ConcurrentExecution.tla modeling N workers, shared server state, response collection",
+        "Server actions: read(rid) and write(rid, val) with interleaved scheduling",
+        "Executor model: N goroutines issuing requests, collecting into Responses[]",
+        "Predicate model: aggregating N responses into a single Result",
+        "Safety property: verdict is deterministic regardless of interleaving order",
+        "Liveness property: all N requests eventually complete",
+        "TLC bounded model: N=3 workers, 2 resources, state space <= 10 values",
+        "If violation found: concrete interleaving trace convertible to Go test case"
+      ],
+      "status": "open",
+      "tags": [
+        "formal-methods",
+        "tla+",
+        "concurrency",
+        "executor",
+        "repeat-concurrent"
+      ],
+      "assigned_agent": "lambda",
+      "review_gate": "Does concurrent execution have real interleaving bugs or is the concurrency trivially safe?"
+    },
+    {
+      "id": 41,
+      "title": "Shrink local-minimum limitation documented with concrete Go test witness",
+      "hypothesis": "The greedy single-axis shrink strategy gets stuck at local minima when the failure surface has disconnected islands requiring simultaneous multi-dimension changes to traverse. A concrete CheckFunc with two failure islands (headers>=2,auth=bearer) and (headers=0,auth='') demonstrates the shrinker reaches (2,bearer) but cannot cross the passing valley to reach (0,'').",
+      "evidence": [
+        "TestShrink_LocalMinimum_GreedyMisses2D passes: shrinker stuck at headers=2,auth=bearer after 1 step",
+        "Global minimum (headers=0,auth='') exists and fails, but is unreachable by single-axis descent",
+        "TLA+ ShrinkTermination.tla documents this as a known limitation (lines 237-256)",
+        "Lambda review confirmed: the limitation is inherent to O(n) single-axis vs O(n^2) pairwise strategy"
+      ],
+      "status": "confirmed",
+      "tags": [
+        "oracle",
+        "shrinking",
+        "local-minimum",
+        "testing",
+        "documentation"
+      ],
+      "assigned_agent": "lambda",
+      "review_gate": "N/A — documentation of known limitation, not a bug to fix"
+    }
   ],
-  "next_id": 40,
+  "next_id": 42,
   "config": {
     "local": true
   }

@@ -447,6 +447,91 @@ func TestShrink_FullSimplification(t *testing.T) {
 	}
 }
 
+// TestShrink_LocalMinimum_GreedyMisses2D demonstrates the greedy shrinker's
+// known limitation: it cannot find the global minimum when the failure
+// surface requires simultaneous changes across two dimensions.
+//
+// The CheckFunc defines a failure region shaped like two disconnected islands:
+//
+//	Island 1: headers >= 2 AND auth == "bearer"  (complex)
+//	Island 2: headers == 0 AND auth == ""         (simple, global minimum)
+//
+// Starting from (headers=3, auth="bearer"), the greedy shrinker:
+//   - Can remove headers: (2, bearer) still fails → accepted
+//   - Cannot remove another header: (1, bearer) passes → rejected
+//   - Cannot simplify auth: (2, basic) passes → rejected
+//   - Gets stuck at (2, bearer) — a local minimum
+//
+// The global minimum (0, "") is reachable only by simultaneously removing
+// all headers AND simplifying auth, which the single-axis strategy never tries.
+//
+// This test documents the limitation identified by TLA+ spec
+// formal/ShrinkTermination.tla (C-013 local-minimum witness).
+func TestShrink_LocalMinimum_GreedyMisses2D(t *testing.T) {
+	original := request.Request{
+		Method: "GET",
+		Path:   "/",
+		Headers: map[string]string{
+			"X-A": "1",
+			"X-B": "2",
+			"X-C": "3",
+		},
+		Auth: "bearer",
+	}
+
+	// Two failure islands: (headers>=2, auth=bearer) OR (headers=0, auth="")
+	check := func(req request.Request) (predicate.Result, error) {
+		h := len(req.Headers)
+		a := req.Auth
+
+		// Island 1: complex (the starting point)
+		if h >= 2 && a == "bearer" {
+			return predicate.Result{
+				Group: "test", Name: "2d-minimum", Status: "fail",
+				Detail: "island1",
+			}, nil
+		}
+		// Island 2: simple (the global minimum)
+		if h == 0 && a == "" {
+			return predicate.Result{
+				Group: "test", Name: "2d-minimum", Status: "fail",
+				Detail: "island2",
+			}, nil
+		}
+		// Valley between islands: passes
+		return predicate.Result{Status: "pass"}, nil
+	}
+
+	cfg := DefaultShrinkConfig()
+	result := Shrink(cfg, original, check)
+
+	// The greedy shrinker CANNOT reach Island 2.
+	// It will be stuck at the local minimum on Island 1.
+	if len(result.Shrunk.Headers) == 0 && result.Shrunk.Auth == "" {
+		t.Fatal("Greedy shrinker reached global minimum — " +
+			"the local minimum limitation is not demonstrated")
+	}
+
+	// Verify it IS stuck at the local minimum: headers=2, auth=bearer
+	if len(result.Shrunk.Headers) != 2 {
+		t.Errorf("Expected local minimum with 2 headers, got %d", len(result.Shrunk.Headers))
+	}
+	if result.Shrunk.Auth != "bearer" {
+		t.Errorf("Expected local minimum with auth=bearer, got %q", result.Shrunk.Auth)
+	}
+
+	// Verify the global minimum EXISTS and is simpler
+	globalMin := request.Request{Method: "GET", Path: "/", Headers: map[string]string{}}
+	globalResult, _ := check(globalMin)
+	if globalResult.Status != "fail" {
+		t.Fatal("Global minimum (headers=0, auth='') should fail but doesn't")
+	}
+
+	t.Logf("Local minimum: headers=%d auth=%q", len(result.Shrunk.Headers), result.Shrunk.Auth)
+	t.Logf("Global minimum: headers=0 auth='' (unreachable by greedy shrinker)")
+	t.Logf("Greedy shrinker stuck at local minimum after %d steps", result.Steps)
+}
+
 // TestCopyRequest verifies deep copy of request headers.
 func TestCopyRequest(t *testing.T) {
 	original := request.Request{
