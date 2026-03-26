@@ -777,9 +777,28 @@ Flags:
 	io.Copy(io.Discard, resp.Body)
 
 	// Run all predicate groups against the response.
+	client := &http.Client{Timeout: 10 * time.Second}
 	var results []predicate.Result
 	for _, group := range predicate.AllGroups() {
+		// Type 1 (Universal): single-response predicates.
 		results = append(results, predicate.Run(group, resp)...)
+
+		// Type 2 (Relational): predicates that compare request+response.
+		if predicate.NeedsRequest(group) {
+			httpReq, _ := http.NewRequest("GET", url, nil)
+			httpReq.Header.Set("Origin", "https://evil.example.com")
+			httpResp, err := client.Do(httpReq)
+			if err == nil {
+				results = append(results, predicate.RunWithRequest(group, httpReq, httpResp)...)
+				io.Copy(io.Discard, httpResp.Body)
+				httpResp.Body.Close()
+			}
+		}
+
+		// Type 3 (Sequential): predicates that send their own requests.
+		if predicate.NeedsMulti(group) {
+			results = append(results, predicate.RunMulti(group, client, url)...)
+		}
 	}
 
 	// Let the oracle judge the results.
