@@ -1,4 +1,4 @@
-.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp haxgoat juice-shop juice-shop-stop smoke diagram images images-all images-clean setup-ollama
+.PHONY: all build build-dev build-all install test test-race test-cover lint fmt clean help version-info quickstart doctor run fetch-owasp haxgoat juice-shop juice-shop-stop smoke diagram images images-all images-clean setup-ollama aq-snapshot aq-monitor
 
 BINARY  := hax
 MODULE  := github.com/aygp-dr/http-axiom
@@ -258,6 +258,26 @@ images-all: images ## Generate sources + all derived sizes
 
 images-clean: ## Remove all generated images
 	rm -rf $(IMGOUT)/*.png $(IMGOUT)/*.txt
+
+# --------------------------------------------------------------------------
+# Agent Queue (aq) monitoring
+# --------------------------------------------------------------------------
+
+AQ_LOG := logs/aq-$(shell date -u +%Y-%m-%d).jsonl
+AQ_POLL ?= 30
+
+aq-snapshot: ## Capture one aq status snapshot to logs/
+	@mkdir -p logs
+	@echo '{"ts":"'$$(date -u +%Y-%m-%dT%H:%M:%SZ)'","broadcasts":'$$(aq status --json)'}' >> $(AQ_LOG)
+	@echo "appended to $(AQ_LOG)"
+
+aq-monitor: ## Poll aq status every AQ_POLL seconds (default 30) into logs/
+	@mkdir -p logs
+	@echo "logging aq to $(AQ_LOG) every $(AQ_POLL)s (ctrl-c to stop)"
+	@while true; do \
+		echo '{"ts":"'$$(date -u +%Y-%m-%dT%H:%M:%SZ)'","broadcasts":'$$(aq status --json)'}' >> $(AQ_LOG); \
+		sleep $(AQ_POLL); \
+	done
 
 # --------------------------------------------------------------------------
 # Utility
