@@ -209,6 +209,26 @@ become valid, making hax a regression gate across time.
 
 See `examples/*/spec.org` for full specifications.
 
+## Structural Changes: Expand / Migrate / Contract
+
+All backward-incompatible changes follow the EMC protocol (Ford et
+al., "Expand/Contract" pattern, a subset of Parallel Change):
+
+1. **Expand** — add the new alongside the old; both work; fitness
+   function verifies both paths
+2. **Migrate** — move all callers to the new; deprecate old; fitness
+   function verifies old has zero callers
+3. **Contract** — remove old; fitness function prevents regression
+
+This applies at every layer: Go package APIs, CLI flags, predicate
+signatures, HTTP service contracts, UI components, and validation
+rules. Each phase requires a passing fitness function before
+proceeding to the next.
+
+See `docs/architecture-governance.org` for the full governance model:
+fitness function taxonomy, contract tiers, connascence analysis, EMC
+examples at every layer, and ADR format.
+
 ## Stack
 
 - Go 1.23+ (stdlib only, flag.FlagSet for rebuild CLI layer)

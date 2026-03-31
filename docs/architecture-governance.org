@@ -1,0 +1,456 @@
+#+TITLE: Architecture Governance: Fitness Functions, Contracts, and Expand/Migrate/Contract
+#+AUTHOR: jw
+#+DATE: 2026-03-31
+#+STARTUP: overview
+#+TODO: ACTIVE PROPOSED | ENFORCED DEPRECATED
+
+* Overview
+
+This document defines how hax's architecture evolves safely over time.
+It uses the vocabulary of /Building Evolutionary Architectures/ (Ford,
+Parsons, Kua, Sadalage, 2e) and /Software Architecture: The Hard
+Parts/ (Ford, Richards, Sadalage, Dehghani) to formalize the
+constraints, contracts, and migration protocol that govern structural
+changes.
+
+The core insight: hax is itself a fitness function factory. It
+produces fitness functions (predicates) that test HTTP security
+properties of other systems. The architecture of hax must therefore be
+governed by its own fitness functions --- a recursive application of
+the same principle.
+
+The three-step migration protocol --- Expand, Migrate, Contract (EMC)
+--- applies at every layer: Go package interfaces, predicate
+signatures, CLI flags, HTTP-level service contracts, UI component
+APIs, and even the rules engines that validate security posture.
+
+* Fitness Functions
+
+** Definition
+
+A fitness function is an objective, automated assessment of an
+architectural characteristic. (Ford et al., Ch. 2)
+
+#+begin_quote
+Fitness functions are to architecture governance as unit tests are to
+domain changes.
+#+end_quote
+
+Fitness functions act as guardrails: they exist to prevent the system
+from degrading regardless of what changes are made to the road surface
+underneath (Fig 4-26, the highway guardrail analogy).
+
+** Categories (Ford et al. taxonomy)
+
+| Axis | Options | hax example |
+|------+---------+-------------|
+| Scope | Atomic / Holistic | Atomic: single predicate passes. Holistic: full pipeline audit |
+| Cadence | Triggered / Continual | Triggered: ~go test~ on commit. Continual: epoch regression gate |
+| Result | Static / Dynamic | Static: ~go vet~, import cycle check. Dynamic: ~hax audit~ against live target |
+| Invocation | Automated / Manual | Automated: CI property tests. Manual: L7 review |
+| Proactivity | Intentional / Emergent | Intentional: CLAUDE.md contracts. Emergent: conjecture from audit |
+
+** hax's Fitness Functions
+
+*** ENFORCED Internal fitness functions (test the tool)
+
+| Function | What it checks | Implementation | Cadence |
+|----------+----------------+----------------+---------|
+| Value semantics | Mutation operators don't corrupt originals | ~mutation_property_test.go~ (rapid) | Every commit |
+| Type consistency | NamedPred.Type matches populated function field | ~predicate_property_test.go~ | Every commit |
+| Shrink termination | Oracle Shrink returns for all inputs | ~oracle_property_test.go~ (rapid) | Every commit |
+| Judge arithmetic | Total == Passed + Failed + Warned + Skipped | ~oracle_property_test.go~ (rapid) | Every commit |
+| Generator bounds | Output drawn from Config axes | ~generator_property_test.go~ (rapid) | Every commit |
+| Relevance completeness | Matrix covers all operators and groups | ~relevance_property_test.go~ | Every commit |
+| Zero-dep binary | ~go build~ produces binary without rapid | ~go version -m hax~ | Every release |
+| gofmt clean | No formatting drift | ~Makefile lint~ | Every commit |
+
+*** ACTIVE External fitness functions (test the targets)
+
+| Function | What it checks | Implementation | Cadence |
+|----------+----------------+----------------+---------|
+| Header predicates | CSP, HSTS, SameSite, X-Frame-Options, etc. | ~internal/predicate/headers.go~ | Per audit |
+| Method predicates | Idempotency, safety per RFC 9110 | ~internal/predicate/methods.go~ | Per check |
+| Cross-origin predicates | CORS, CORS-reflection | ~internal/predicate/crossorigin.go~ | Per check |
+| Cache predicates | ETag, no-store, Vary, 304 | ~internal/predicate/cache.go~ | Per check |
+| State predicates | Workflow-skip, TOCTOU, replay | ~internal/predicate/state.go~ | Per check |
+
+*** PROPOSED Epoch fitness functions (test over time)
+
+| Function | What it checks | Implementation | Cadence |
+|----------+----------------+----------------+---------|
+| Epoch regression | Security posture does not regress between epochs | ~examples/*/scenarios/*.yml~ | Per epoch transition |
+| Observation drift | Properties change only when expected | Scenario diff between runs | Continual |
+
+* Contracts
+
+** Definition
+
+A contract is an agreement between two components at a boundary. In
+hax, contracts exist between:
+
+- Go packages (internal API boundaries)
+- CLI flags and internal Config structs
+- hax and its HTTP targets (the predicate contract)
+- Example apps and their epoch specifications
+- Agents and the conjecture tracker
+
+** Contract Tiers (from L7 review)
+
+| Tier | Boundary | Contract | Connascence type |
+|------+----------+----------+------------------|
+| Transport | executor <-> network | Timeout, body limit, redirect policy | CoA (algorithm) |
+| Generation | generator -> request | Config axes bound output | CoT (type) |
+| Mutation | mutation -> request | Value semantics (deep copy) | CoA (algorithm) |
+| Routing | relevance -> predicate groups | Matrix completeness | CoN (name) |
+| Verification | predicate -> RFC spec | Predicate type determines dispatch | CoM (meaning) |
+| Judgement | oracle -> predicate results | Status in {pass, fail, warn, skip} | CoM (meaning) |
+| Presentation | output -> verdict | JSON schema stability | CoT (type) |
+| CLI | main.go -> Config structs | Every Config field has a flag | CoN (name) |
+
+** Connascence Analysis (Page-Jones via Ford et al.)
+
+Connascence measures coupling. Stronger connascence = harder to
+evolve. The goal: minimize connascence across package boundaries;
+maximize it within.
+
+*** Static connascence in hax
+
+| Type | Strength | Where in hax | Risk |
+|------+----------+--------------+------|
+| CoN (Name) | Weakest | Group name strings shared between relevance and predicate | Low: rename refactors trivially |
+| CoT (Type) | Low | ~request.Request~ shared across 5 packages | Low: single definition, value type |
+| CoM (Meaning) | Medium | Status strings "pass"/"fail"/"warn"/"skip" | Medium: no enum, magic strings |
+| CoA (Algorithm) | High | ~copyHeaders~ deep-copy discipline | High: violation is silent corruption |
+| CoP (Position) | Low | Flag parsing order in main.go | Low: ~stripGlobalFlags~ handles it |
+
+*** Dynamic connascence in hax
+
+| Type | Strength | Where in hax | Risk |
+|------+----------+--------------+------|
+| CoE (Execution) | Medium | Middleware ordering in example apps | Medium: wrong order = missing headers |
+| CoT (Timing) | High | ~repeat-concurrent~ mutation + TOCTOU predicate | High: race-sensitive by design |
+| CoV (Value) | Medium | Shrink lattice (auth ladder values must match) | Medium: adding auth type breaks ladder |
+| CoI (Identity) | Low | Response body reference in executor.Result | Low: but NopCloser antipattern showed the risk |
+
+** The CLI-to-Config Wiring Contract
+
+Learned from the P0 fix cycle: features added to ~executor.Config~
+without corresponding CLI flags are dead code in production. Tests
+pass because they construct Config directly.
+
+*Rule*: Every new Config field MUST have:
+1. A CLI flag that populates it
+2. A default in ~DefaultConfig()~
+3. A code path from every command handler in ~main.go~ that sets it
+4. A fitness function verifying the flag reaches the Config
+
+This is Connascence of Name between the flag string and the Config
+field. It is the weakest form of connascence and should be trivially
+maintainable --- but the P0 cycle proved it is not enforced without a
+fitness function.
+
+* Expand / Migrate / Contract (EMC)
+
+** The Pattern
+
+EMC (called Expand/Contract by Ford et al., a subset of Parallel
+Change) is the safe way to make backward-incompatible changes. It
+applies at any boundary: package APIs, CLI flags, HTTP endpoints, UI
+components, database schemas, or security rules.
+
+#+begin_example
+┌─────────┐     ┌─────────────┐     ┌──────────┐
+│  Start   │────▶│   Expand    │────▶│ Migrate  │────▶ Contract
+│          │     │ old + new   │     │ move all  │     (remove old)
+│ old only │     │ coexist     │     │ to new    │
+└─────────┘     └─────────────┘     └──────────┘
+                  fitness fn:         fitness fn:
+                  both work           old has 0 callers
+#+end_example
+
+The key insight: each phase has a fitness function that must pass
+before proceeding to the next phase. The fitness function is what
+makes the migration safe --- not the developer's intention, not code
+review, but an automated check.
+
+** EMC at the Go Package Level
+
+Example: promoting a stub predicate (Type 1 Fn) to a real
+implementation (Type 3 MultiFn).
+
+*** Phase 1: Expand
+
+Add ~MultiFn~ alongside existing ~Fn~ on the ~NamedPred~:
+
+#+begin_src go
+{Name: "csrf", Fn: checkCSRF, MultiFn: checkCSRFMulti, Type: TypeSequential}
+#+end_src
+
+Fitness function: ~Validate()~ accepts both fields during expansion.
+~TestProperty_ExactlyOneFunctionFieldSet~ is temporarily relaxed for
+this predicate (added to expansion allowlist).
+
+*** Phase 2: Migrate
+
+Update all callers (~Run~, ~RunMulti~, ~cmdCheck~, ~cmdRun~) to
+prefer ~MultiFn~ when present. The old ~Fn~ still works as fallback.
+
+Fitness function: integration test confirms the new ~MultiFn~ path
+produces results (not just "skip"). Add to epoch scenario: the
+predicate now returns pass/fail against haxgoat.
+
+*** Phase 3: Contract
+
+Remove ~Fn: checkCSRF~ from the NamedPred. Remove the stub function.
+Remove the predicate from ~knownTypeConsistencyExceptions~ in the
+property test.
+
+Fitness function: ~TestProperty_TypeMatchesPopulatedField~ now
+enforces Type=Sequential -> MultiFn for this predicate. The
+property test itself becomes the fitness function that prevents
+regression.
+
+** EMC at the CLI Flag Level
+
+Example: adding ~--max-body-size~ to the executor.
+
+*** Phase 1: Expand
+
+Add ~MaxBodySize~ to ~executor.Config~ with a default in
+~DefaultConfig()~. Add ~--max-body-size~ flag to ~cmdAudit~,
+~cmdCheck~, ~cmdRun~. Both the old path (no limit) and new path
+(limited) work.
+
+Fitness function: ~go test~ with explicit ~MaxBodySize~ values.
+Integration test invoking ~hax audit --max-body-size 1024~ against
+a test server returning large bodies.
+
+*** Phase 2: Migrate
+
+~DefaultConfig()~ sets a non-zero default (10MB). All command
+handlers use ~DefaultConfig()~ as the base, overriding only what the
+user specifies via flags.
+
+Fitness function: no ~executor.Config{}~ literal in main.go (grep
+fitness function). All configs flow through ~DefaultConfig()~.
+
+*** Phase 3: Contract
+
+Remove any code paths that construct ~executor.Config~ without going
+through ~DefaultConfig()~. The zero-value ~MaxBodySize: 0~ path
+(unlimited) is still available via ~--max-body-size 0~ but is no
+longer the silent default.
+
+Fitness function: the CLI-to-Config wiring test verifies every Config
+field is reachable from a flag.
+
+** EMC at the HTTP Level
+
+This is where hax's value proposition meets the pattern. When a
+service changes its HTTP security posture, the change should follow
+EMC --- and hax is the fitness function that verifies each phase.
+
+Example: a service adding HSTS.
+
+*** Phase 1: Expand
+
+The service begins returning ~Strict-Transport-Security: max-age=0~
+(HSTS disabled, but header present). Old behavior (no header) and new
+behavior (header present) coexist.
+
+hax fitness function: ~hax audit~ reports HSTS as ~fail~ (max-age too
+low). The service is in expand phase --- the header exists but the
+policy is not yet enforced. This is a known intermediate state.
+
+*** Phase 2: Migrate
+
+The service sets ~max-age=31536000; includeSubDomains~. All clients
+(browsers, CDN, proxies) observe the new policy. The preload list
+submission happens here.
+
+hax fitness function: ~hax audit~ reports HSTS as ~pass~. The epoch
+scenario file records this transition.
+
+*** Phase 3: Contract
+
+The service removes any ~max-age=0~ override endpoints. The HSTS
+policy is the only behavior. Reverting requires an explicit epoch
+change.
+
+hax fitness function: the epoch regression gate ensures HSTS does not
+regress to ~fail~ in any subsequent epoch.
+
+** EMC for UI Components
+
+The pattern applies identically to frontend component evolution.
+When a UI component's security-relevant behavior changes (form CSRF
+tokens, cookie attributes, fetch credentials mode), EMC governs the
+migration.
+
+Example: migrating a form from synchronizer token to anti-CSRF header.
+
+*** Phase 1: Expand
+
+The form sends BOTH the traditional ~authenticity_token~ hidden field
+AND the ~X-Requested-With~ custom header. The server accepts either.
+
+hax fitness function: ~hax check --group cross-origin~ passes because
+the CSRF protection exists (either mechanism). The Lookbook preview
+shows both mechanisms in the component's annotated state.
+
+*** Phase 2: Migrate
+
+All forms are updated to use the header. The hidden field is still
+rendered but no longer required by the server. A deprecation warning
+is logged server-side when the old mechanism is used.
+
+hax fitness function: same predicates still pass. The server-side
+deprecation log is a separate fitness function (not hax's
+responsibility, but an adjacent concern).
+
+*** Phase 3: Contract
+
+The hidden field is removed from the form component. The server
+rejects requests that rely only on the old mechanism.
+
+hax fitness function: ~hax check --group cross-origin~ still passes
+(the header mechanism works). A new scenario verifies that requests
+WITHOUT the header are rejected (the old path is truly closed).
+
+** EMC for Innersource / Shared Libraries
+
+When an internal library changes its security contract (e.g., a
+shared auth middleware updates its token validation), EMC applies
+across all consuming services.
+
+*** Phase 1: Expand
+
+The library ships a new validation function alongside the old one.
+Both are exported. The old one is annotated ~// Deprecated: use
+ValidateTokenV2~.
+
+hax fitness function: services using the library are audited. Both
+old and new validation paths produce the same security headers. The
+~hax audit~ output is identical for both code paths.
+
+*** Phase 2: Migrate
+
+Consuming services switch to the new function. The library's CI
+tracks which services still import the old function (via a dependency
+graph fitness function --- this is the jQAssistant/Neo4j pattern from
+Ford et al. Fig 4-24).
+
+hax fitness function: each consuming service's security posture is
+unchanged after migration. Epoch scenarios for each service record
+the switch.
+
+*** Phase 3: Contract
+
+The old function is removed. Services that did not migrate break at
+compile time (Go's type system enforces this for function signatures).
+
+hax fitness function: not directly involved --- this is a compile-time
+contract, not a runtime one. But hax verifies that the behavioral
+contract (security headers) survived the migration.
+
+** EMC for Validation Rules
+
+When the rules that define "correct" security behavior change (e.g.,
+minimum HSTS max-age increases from 6 months to 1 year), the rule
+change itself follows EMC.
+
+*** Phase 1: Expand
+
+The predicate accepts both the old threshold (15768000) and the new
+threshold (31536000). Responses meeting the old-but-not-new threshold
+are reported as ~warn~ (not ~fail~).
+
+*** Phase 2: Migrate
+
+Documentation, scenarios, and epoch specs are updated to reflect the
+new threshold. The ~warn~ gives teams time to update their
+configurations.
+
+*** Phase 3: Contract
+
+The old threshold is removed. Responses below 31536000 are now
+~fail~. The predicate's RFC citation is updated to reference the
+current recommendation.
+
+Fitness function: the predicate's own test suite encodes the new
+threshold. The old test cases are removed.
+
+* Architecture Decision Records
+
+Each structural change should be documented as an ADR. The format:
+
+#+begin_example
+## ADR-NNN: <title>
+
+**Status**: proposed | accepted | deprecated | superseded by ADR-MMM
+
+**Context**: What forces are at play?
+
+**Decision**: What did we decide?
+
+**Consequences**: What are the trade-offs?
+
+**Fitness functions**: What automated checks verify this decision holds?
+
+**EMC phase**: expand | migrate | contract | n/a (new decision)
+#+end_example
+
+ADRs live in ~docs/adr/~ as individual files. The EMC phase field
+tracks where a migrating decision stands.
+
+** Existing Implicit ADRs (to be formalized)
+
+| # | Decision | Status | Fitness function |
+|---+----------+--------+------------------|
+| 1 | Zero external runtime dependencies | Accepted | ~go version -m hax~ shows no deps |
+| 2 | Hand-written CLI flag parsing | Accepted | None (gap) |
+| 3 | request.Request as value type | Accepted | ~mutation_property_test.go~ |
+| 4 | Three predicate types (Universal/Relational/Sequential) | Accepted | ~predicate_property_test.go~ |
+| 5 | Relevance matrix for mutation routing | Accepted | ~relevance_property_test.go~ |
+| 6 | pgregory.net/rapid as test-only dependency | Accepted | ~go version -m hax~ (absent from binary) |
+| 7 | Conjecture workflow with review gates | Accepted | None (process, not code) |
+| 8 | Epoch model for example app evolution | Proposed | Scenario files (not yet implemented) |
+
+* Connascence Heuristics for hax Development
+
+From Page-Jones via Ford et al.:
+
+1. *Rule of Degree*: convert strong forms of connascence into weaker
+   forms. Example: replace magic status strings ("pass"/"fail") with
+   typed constants.
+
+2. *Rule of Locality*: as the distance between software elements
+   increases, use weaker forms of connascence. Example: packages
+   communicating via ~request.Request~ (CoT, weak) rather than
+   sharing internal state (CoV, strong).
+
+3. *Minimize cross-boundary connascence*: the relevance matrix
+   couples predicate group names (strings) across the relevance and
+   predicate packages. This is CoN (weakest). Do not strengthen it to
+   CoT by sharing types between these packages.
+
+4. *Maximize within-boundary connascence*: within ~internal/oracle~,
+   the shrink lattice uses CoA (algorithm connascence) between
+   ~shrinkAuth~ and the auth ladder ordering. This is acceptable
+   because it is localized.
+
+* References
+
+- Ford, Parsons, Kua, Sadalage. /Building Evolutionary
+  Architectures/, 2nd ed. O'Reilly, 2023. (fitness functions,
+  contracts, connascence, expand/contract, anticorruption layers)
+- Ford, Richards, Sadalage, Dehghani. /Software Architecture: The
+  Hard Parts/. O'Reilly, 2021. (trade-off analysis, contract
+  management, service decomposition)
+- Newman. /Monolith to Microservices/. O'Reilly, 2020. (parallel
+  change, expand/contract for data migration, strangler fig)
+- Page-Jones. /What Every Programmer Should Know About Object-Oriented
+  Design/. Dorset House, 1996. (connascence)
+- Evans. /Domain-Driven Design/. Addison-Wesley, 2004. (bounded
+  context, anticorruption layer)
