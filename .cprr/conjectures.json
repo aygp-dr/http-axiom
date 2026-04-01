@@ -78,7 +78,7 @@
       "assigned_agent": "staff-engineer",
       "review_gate": "Is relevance matrix reduction measurable against current test suite?",
       "evidence": [
-        "Fixed in this commit \u2014 build and tests pass"
+        "Fixed in this commit — build and tests pass"
       ]
     },
     {
@@ -168,8 +168,8 @@
       "title": "cmdList hardcoded data diverges from predicate package",
       "hypothesis": "Replacing cmdList string literals with predicate.AllGroups() iteration will show cors-reflection and referrer-policy that are currently hidden from hax list output.",
       "evidence": [
-        "hax list groups now shows cors-reflection and referrer-policy \u2014 were hidden in hardcoded version",
-        "23 predicates listed dynamically from predicate.AllGroups() \u2014 was 19 hardcoded"
+        "hax list groups now shows cors-reflection and referrer-policy — were hidden in hardcoded version",
+        "23 predicates listed dynamically from predicate.AllGroups() — was 19 hardcoded"
       ],
       "status": "confirmed",
       "tags": [
@@ -200,7 +200,7 @@
     {
       "id": 13,
       "title": "TLA+: Shrink terminates and preserves failure monotonically",
-      "hypothesis": "The oracle Shrink algorithm can be modeled as a TLA+ state machine over a 5-dimensional lattice (headers\u00d7auth\u00d7origin\u00d7method\u00d7repeat). The spec should prove: (1) every accepted step strictly decreases a well-founded complexity measure, (2) the failure property is an inductive invariant across all transitions, (3) MaxAttempts is a redundant bound (termination holds without it). If the greedy single-axis strategy can miss globally minimal counterexamples, TLA+ model checking on a bounded instance will produce a concrete witness.",
+      "hypothesis": "The oracle Shrink algorithm can be modeled as a TLA+ state machine over a 5-dimensional lattice (headers×auth×origin×method×repeat). The spec should prove: (1) every accepted step strictly decreases a well-founded complexity measure, (2) the failure property is an inductive invariant across all transitions, (3) MaxAttempts is a redundant bound (termination holds without it). If the greedy single-axis strategy can miss globally minimal counterexamples, TLA+ model checking on a bounded instance will produce a concrete witness.",
       "falsification": "A TLC trace showing a shrink sequence that cycles, diverges, or accepts a non-failing simplification refutes the conjecture. A witness of a 2-dimensional step the greedy shrinker cannot find demonstrates the local-minimum limitation.",
       "tool": "TLA+/TLC",
       "acceptance_criteria": [
@@ -212,7 +212,7 @@
       ],
       "evidence": [
         "TLC verified 2,500 distinct states: TypeOK, ComplexityDecreases, BoundedSteps, EventuallyDone all pass",
-        "MaxAttempts is provably redundant for termination \u2014 complexity is well-founded and strictly decreasing",
+        "MaxAttempts is provably redundant for termination — complexity is well-founded and strictly decreasing",
         "Local-minimum limitation documented: greedy single-axis strategy cannot find minima requiring 2+ simultaneous dimension changes",
         "Spec: formal/ShrinkTermination.tla, config: formal/ShrinkTermination.cfg"
       ],
@@ -255,7 +255,7 @@
     {
       "id": 15,
       "title": "Dafny: Mutation operators preserve value semantics and relevance matrix is a valid routing",
-      "hypothesis": "Each mutation operator can be specified in Dafny with a postcondition: the original request's Headers map is unmodified (frame condition). The ensures clause `old(req.Headers) == req.Headers` should be provable for all 8 operators after copyHeaders. Additionally, the relevance matrix can be modeled as a function from Mutation\u2192set<Group> with the completeness property: every mutation in AllOperators appears in at least one mapping, and every group in GroupNames is reachable. Dafny's verifier should either prove these or produce a counterexample for originSameSiteMutator (which skips copyHeaders).",
+      "hypothesis": "Each mutation operator can be specified in Dafny with a postcondition: the original request's Headers map is unmodified (frame condition). The ensures clause `old(req.Headers) == req.Headers` should be provable for all 8 operators after copyHeaders. Additionally, the relevance matrix can be modeled as a function from Mutation→set<Group> with the completeness property: every mutation in AllOperators appears in at least one mapping, and every group in GroupNames is reachable. Dafny's verifier should either prove these or produce a counterexample for originSameSiteMutator (which skips copyHeaders).",
       "falsification": "If Dafny proves the frame condition for originSameSiteMutator without copyHeaders, the shallow-copy risk identified in the invariant review is not real (Go's value semantics protect it). If the relevance completeness proof fails, there is a dead mutation or unreachable group.",
       "tool": "Dafny",
       "acceptance_criteria": [
@@ -279,14 +279,14 @@
     {
       "id": 16,
       "title": "Lean4: Predicate type algebra and property classification theorem",
-      "hypothesis": "The three predicate types (Universal, Relational, Sequential) form a subtyping lattice where Type 1 \u2282 Type 2 \u2282 Type 3 (every universal property can be checked relationally by ignoring the request, every relational property can be checked sequentially by sending one request). This can be formalized in Lean4 as an inductive type with coercion functions. A theorem should prove: the composition of a Type-k predicate with a mutation of relevance-arity n is well-typed iff k >= n's minimum required type. This gives a type-theoretic foundation for the relevance matrix.",
+      "hypothesis": "The three predicate types (Universal, Relational, Sequential) form a subtyping lattice where Type 1 ⊂ Type 2 ⊂ Type 3 (every universal property can be checked relationally by ignoring the request, every relational property can be checked sequentially by sending one request). This can be formalized in Lean4 as an inductive type with coercion functions. A theorem should prove: the composition of a Type-k predicate with a mutation of relevance-arity n is well-typed iff k >= n's minimum required type. This gives a type-theoretic foundation for the relevance matrix.",
       "falsification": "If a Type 1 predicate genuinely cannot be lifted to Type 2 (the response alone is insufficient context even with a trivial request), the subtyping claim is false. The CORS reflection predicate (Type 2) is a candidate: it REQUIRES the request to determine correctness.",
       "tool": "Lean4",
       "acceptance_criteria": [
         "Lean4 inductive type for PredicateType with three constructors",
-        "Coercion functions: Universal\u2192Relational\u2192Sequential with proofs they preserve semantics",
+        "Coercion functions: Universal→Relational→Sequential with proofs they preserve semantics",
         "Formalization of the relevance matrix as a dependent type: TestCase (m : Mutation) (gs : List Group) (min_type : PredicateType)",
-        "Theorem: well-typedness of mutation\u00d7predicate composition",
+        "Theorem: well-typedness of mutation×predicate composition",
         "At least one example predicate from each type fully formalized with its RFC property statement",
         "Discussion: is the subtyping lattice the right model, or should types be disjoint with explicit lifting?"
       ],
@@ -304,7 +304,7 @@
     {
       "id": 17,
       "title": "TLA+: HTTP method safety and idempotency as state machine properties",
-      "hypothesis": "RFC 9110 \u00a79.2.1 (safe methods) and \u00a79.2.2 (idempotent methods) can be modeled as a TLA+ state machine where server state is an integer counter and HTTP methods are actions. Safety = GET/HEAD/OPTIONS do not change state. Idempotency = PUT/DELETE applied N times yield same state as once. The spec should model hax's checkIdempotencyMulti and checkSafetyMulti predicates and verify they correctly detect violations. This provides a reference oracle: if the TLA+ model says 'violation' and hax says 'pass', hax has a false negative.",
+      "hypothesis": "RFC 9110 §9.2.1 (safe methods) and §9.2.2 (idempotent methods) can be modeled as a TLA+ state machine where server state is an integer counter and HTTP methods are actions. Safety = GET/HEAD/OPTIONS do not change state. Idempotency = PUT/DELETE applied N times yield same state as once. The spec should model hax's checkIdempotencyMulti and checkSafetyMulti predicates and verify they correctly detect violations. This provides a reference oracle: if the TLA+ model says 'violation' and hax says 'pass', hax has a false negative.",
       "falsification": "If the TLA+ model shows that status-code comparison (which hax avoids per C-004) is equivalent to state comparison for the bounded model, conjecture 4 (idempotency requires state comparison) is weakened.",
       "tool": "TLA+/TLC",
       "acceptance_criteria": [
@@ -317,7 +317,7 @@
       ],
       "evidence": [
         "TLC verified 276,965 distinct states: SafeMethodsPreserveState and IdempotentPUTConverges both hold",
-        "StatusCodeIdempotency_SHOULD_FAIL violated as expected: PUT returns 201 (create) then 200 (update) \u2014 different codes, same state",
+        "StatusCodeIdempotency_SHOULD_FAIL violated as expected: PUT returns 201 (create) then 200 (update) — different codes, same state",
         "This validates C-004: hax correctly uses state comparison (response body diff) rather than status code comparison",
         "Spec: formal/HTTPMethodSemantics.tla, configs: formal/HTTPMethodSemantics.cfg and HTTPMethodSemantics_StatusCode.cfg"
       ],
@@ -495,7 +495,7 @@
     {
       "id": 28,
       "title": "pgregory.net/rapid as test-only PBT dependency closes structural test gaps",
-      "hypothesis": "Adding rapid as a test-only dependency and writing property tests for the 6 core invariants (mutation value semantics, shrink termination, generator bounds, NamedPred type consistency, relevance completeness, Judge arithmetic) will find at least 1 bug the existing example-based tests miss. Properties over AllOperators() are closed under extension \u2014 adding mutator #9 automatically tests it. Rapid's integrated shrinking will produce minimal counterexamples without hand-written shrinkers.",
+      "hypothesis": "Adding rapid as a test-only dependency and writing property tests for the 6 core invariants (mutation value semantics, shrink termination, generator bounds, NamedPred type consistency, relevance completeness, Judge arithmetic) will find at least 1 bug the existing example-based tests miss. Properties over AllOperators() are closed under extension — adding mutator #9 automatically tests it. Rapid's integrated shrinking will produce minimal counterexamples without hand-written shrinkers.",
       "falsification": "If rapid property tests over 10k iterations per invariant find zero new bugs beyond what the existing 4 hand-written deep-copy tests and fixed-input Judge test already cover, the value is marginal and the dep is not worth it.",
       "acceptance_criteria": [
         "go.mod gains pgregory.net/rapid as test-only dependency; go build ./... still produces zero-dep binary",
@@ -545,7 +545,7 @@
     {
       "id": 30,
       "title": "Audit needs diff/compare mode for epoch-based regression tracking",
-      "hypothesis": "Adding --baseline <file> to hax audit that loads a prior YAML result and outputs a delta (new passes, regressions, resolved failures) will eliminate manual diff of JSON output between epochs. Against petstore-rails Epoch 0\u21921, the diff should show 5 resolved (csp, corp, coep, coop, permissions-policy), 0 regressions, 1 persistent (hsts). Without this, epoch tracking requires external tooling or eyeball comparison of full JSON blobs.",
+      "hypothesis": "Adding --baseline <file> to hax audit that loads a prior YAML result and outputs a delta (new passes, regressions, resolved failures) will eliminate manual diff of JSON output between epochs. Against petstore-rails Epoch 0→1, the diff should show 5 resolved (csp, corp, coep, coop, permissions-policy), 0 regressions, 1 persistent (hsts). Without this, epoch tracking requires external tooling or eyeball comparison of full JSON blobs.",
       "falsification": "If teams use external diff tools (jq, vimdiff) effectively and never request built-in comparison, the feature adds complexity without adoption.",
       "evidence": [
         "petstore-rails Epoch 0: 7 pass, 3 fail, 3 warn. Epoch 1: 12 pass, 1 fail, 0 warn. Required manual comparison of two full JSON outputs to determine what changed."
@@ -583,7 +583,7 @@
     {
       "id": 32,
       "title": "Remediation hints in audit output close the developer feedback loop",
-      "hypothesis": "Adding a 'remediation' field to each failing/warning result with a one-liner fix and RFC section reference will reduce time-to-fix by eliminating the research step. For csp: 'Add Content-Security-Policy header (CSP L3 \u00a72, RFC 9110 \u00a78.1)'. For hsts: 'Add Strict-Transport-Security: max-age=31536000; includeSubDomains (RFC 6797 \u00a76.1)'. Enabled via --remediate flag to keep default output lean. Against petstore-rails Epoch 0, all 3 failures and 3 warnings would include actionable fix text.",
+      "hypothesis": "Adding a 'remediation' field to each failing/warning result with a one-liner fix and RFC section reference will reduce time-to-fix by eliminating the research step. For csp: 'Add Content-Security-Policy header (CSP L3 §2, RFC 9110 §8.1)'. For hsts: 'Add Strict-Transport-Security: max-age=31536000; includeSubDomains (RFC 6797 §6.1)'. Enabled via --remediate flag to keep default output lean. Against petstore-rails Epoch 0, all 3 failures and 3 warnings would include actionable fix text.",
       "falsification": "If developers already know what CSP/HSTS/CORP are and find remediation text patronizing or noisy, the feature degrades UX for experienced users. The --remediate flag mitigates this but adds flag surface area.",
       "evidence": [
         "petstore-rails Epoch 0 failures say 'Content-Security-Policy header missing' but not how to add it. Developer must know Rails middleware patterns independently. Standard tools like bundler-audit and brakeman include fix suggestions."
@@ -602,7 +602,7 @@
     {
       "id": 33,
       "title": "Skip-reason taxonomy distinguishes 'not applicable' from 'not implemented'",
-      "hypothesis": "The 12 skipped predicates in audit output conflate two distinct reasons: (a) the predicate is implemented but the response doesn't trigger it (e.g. 'no cookies set' for samesite), and (b) the predicate is a stub awaiting multi-request support (e.g. 'requires stateful test'). Adding a skip_reason enum (not_applicable | not_implemented | requires_feature) and a --hide-skip flag will let users filter noise. Against petstore-rails, 4 of 12 skips are 'not_applicable' and 8 are 'not_implemented' \u2014 users should be able to distinguish these.",
+      "hypothesis": "The 12 skipped predicates in audit output conflate two distinct reasons: (a) the predicate is implemented but the response doesn't trigger it (e.g. 'no cookies set' for samesite), and (b) the predicate is a stub awaiting multi-request support (e.g. 'requires stateful test'). Adding a skip_reason enum (not_applicable | not_implemented | requires_feature) and a --hide-skip flag will let users filter noise. Against petstore-rails, 4 of 12 skips are 'not_applicable' and 8 are 'not_implemented' — users should be able to distinguish these.",
       "falsification": "If users treat all skips uniformly and never filter by reason, the taxonomy adds structural complexity with no UX benefit.",
       "evidence": [
         "petstore-rails audit: 12/25 predicates skipped. 'no cookies set' (legitimate skip) is visually identical to 'requires multi-request test' (hax limitation). Nearly half the output is uninformative noise for single-request audit."
@@ -685,7 +685,7 @@
       "evidence": [
         "L7 review: mutation.go line 105-108 is the only mutator without copyHeaders",
         "C-008 confirmed the general principle; this is a specific gap that passed property tests by accident (no header modification in this mutator)",
-        "Fixed in this commit \u2014 build and tests pass"
+        "Fixed in this commit — build and tests pass"
       ],
       "status": "confirmed",
       "tags": [
@@ -705,7 +705,7 @@
       "evidence": [
         "L7 review: CLAUDE.md contract says 'Caller MUST close ALL response bodies in executor.Result.Responses (not just [0])'",
         "main.go:791 only closes result.Response, violating the contract",
-        "Fixed in this commit \u2014 build and tests pass"
+        "Fixed in this commit — build and tests pass"
       ],
       "status": "confirmed",
       "tags": [
@@ -719,13 +719,13 @@
     },
     {
       "id": 39,
-      "title": "request.Request lacks Body field \u2014 pipeline and sequential predicates diverge",
+      "title": "request.Request lacks Body field — pipeline and sequential predicates diverge",
       "hypothesis": "request.Request has no Body field. The executor sends bodyless requests, but sequential predicates (checkIdempotencyMulti) create their own bodied requests bypassing the pipeline. Adding Body []byte to Request unifies the pipeline path with sequential predicates.",
       "falsification": "If sequential predicates intentionally bypass the pipeline's request representation (they own their full HTTP lifecycle), adding Body to Request couples two intentionally separate paths.",
       "evidence": [
         "L7 review: executor.doRequest line 113 always passes nil body. checkIdempotencyMulti in methods.go creates strings.NewReader body directly.",
-        "hax run tests PUT idempotency via executor (bodyless) while hax check methods tests via MultiFn (bodied) \u2014 different server behavior",
-        "Fixed in this commit \u2014 build and tests pass"
+        "hax run tests PUT idempotency via executor (bodyless) while hax check methods tests via MultiFn (bodied) — different server behavior",
+        "Fixed in this commit — build and tests pass"
       ],
       "status": "confirmed",
       "tags": [
@@ -736,8 +736,7 @@
       ],
       "assigned_agent": "staff-engineer",
       "review_gate": "Does Body in Request unify the pipeline or couple intentionally separate paths?"
-    }
-    ,
+    },
     {
       "id": 40,
       "title": "TLA+: Concurrent execution correctness for repeat-concurrent mutation",
@@ -784,9 +783,34 @@
       ],
       "assigned_agent": "lambda",
       "review_gate": "N/A — documentation of known limitation, not a bug to fix"
+    },
+    {
+      "id": 42,
+      "title": "Export NewClient to eliminate scatter-client policy bypass in main.go",
+      "hypothesis": "Exporting executor.NewClient(cfg) and replacing all 5 bare &http.Client{} constructions in main.go with execCfg.NewClient() will ensure body-size limits, redirect policy, and timeout are applied uniformly to ALL HTTP requests hax sends — including Type 2 relational probes and Type 3 sequential predicates. The current scatter-client pattern (5 independent client constructions, none with CheckRedirect or body wrapping) means P0-3's redirect hardening only protects executor.Execute calls, bypassing all predicate runner paths.",
+      "falsification": "If Type 2/3 predicates need different client configurations (e.g., no redirect following for redirect-detection predicates), a single NewClient factory is too coarse and per-predicate client control is needed instead.",
+      "acceptance_criteria": [
+        "executor.NewClient(cfg Config) *http.Client exported from executor package",
+        "NewClient applies: Timeout, makeCheckRedirect(MaxRedirects), and body-size wrapping",
+        "grep '&http.Client{' main.go returns 0 matches (all replaced with NewClient)",
+        "grep '\\.Do(' main.go shows only calls through executor-managed clients",
+        "Type 2 relational client.Do calls use NewClient",
+        "Type 3 predicate.RunMulti receives client from NewClient",
+        "Fitness function: CI grep gate for bare http.Client construction"
+      ],
+      "status": "open",
+      "tags": [
+        "architecture",
+        "executor",
+        "transport-policy",
+        "scatter-client",
+        "emc"
+      ],
+      "assigned_agent": "staff-engineer",
+      "review_gate": "Does a single client factory work for all predicate types, or do some predicates need redirect-following disabled?"
     }
   ],
-  "next_id": 42,
+  "next_id": 43,
   "config": {
     "local": true
   }
