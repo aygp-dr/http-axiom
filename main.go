@@ -508,11 +508,10 @@ Flags:
 
 	verbose("checking %d group(s) against %s", len(groups), url)
 
-	// Set up executor and HTTP client.
-	execCfg := executor.Config{
-		BaseURL: url,
-		Timeout: 10 * time.Second,
-	}
+	// Set up executor config. The executor creates its own http.Client
+	// with redirect policy enforcement via newClient().
+	execCfg := executor.DefaultConfig()
+	execCfg.BaseURL = url
 	client := &http.Client{Timeout: execCfg.Timeout}
 
 	var allResults []predicate.Result
@@ -613,8 +612,10 @@ Flags:
   --max-shrinks N        Maximum shrink attempts (default: 50)
   --timeout DURATION     Per-request timeout (default: 10s)
   --concurrency N        Parallel requests (default: 1)
+  --max-redirects N      Maximum redirects to follow (default: 10)
   -g, --groups LIST      Predicate groups to check (default: all)
   -o, --operators LIST   Mutation operators (default: all)
+  --max-body-size BYTES  Max response body to read (default: 10485760)
   --fail-fast            Stop on first failure
   -h, --help             Show this help
 `)
@@ -631,6 +632,8 @@ Flags:
 	seed := int64(0)
 	timeout := 10 * time.Second
 	concurrency := 1
+	maxRedirects := 10
+	maxBodySize := int64(10 * 1024 * 1024)
 	groupList := ""
 	operatorList := ""
 	failFast := false
@@ -665,6 +668,16 @@ Flags:
 		case "--concurrency":
 			if i+1 < len(args) {
 				fmt.Sscanf(args[i+1], "%d", &concurrency)
+				i++
+			}
+		case "--max-redirects":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &maxRedirects)
+				i++
+			}
+		case "--max-body-size":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &maxBodySize)
 				i++
 			}
 		case "-g", "--groups":
@@ -760,11 +773,12 @@ Flags:
 	// ---------------------------------------------------------------
 	// 4. Execute + Check
 	// ---------------------------------------------------------------
-	execCfg := executor.Config{
-		BaseURL:     url,
-		Timeout:     timeout,
-		Concurrency: concurrency,
-	}
+	execCfg := executor.DefaultConfig()
+	execCfg.BaseURL = url
+	execCfg.Timeout = timeout
+	execCfg.Concurrency = concurrency
+	execCfg.MaxRedirects = maxRedirects
+	execCfg.MaxBodySize = maxBodySize
 	client := &http.Client{Timeout: timeout}
 
 	var allResults []predicate.Result
@@ -776,93 +790,107 @@ Flags:
 			break
 		}
 
-		req := tagged.Req
+		// Closure ensures defer fires per-iteration, closing response
+		// bodies on ALL paths — including error returns from Execute
+		// that may leave partial results with open bodies.
+		iterResults, iterStopped := func() ([]predicate.Result, bool) {
+			req := tagged.Req
 
-		// Execute the request.
-		result := executor.Execute(execCfg, req)
-		if result.Err != nil {
-			verbose("[%d/%d] %s %s -> ERROR: %v", idx+1, total, req.Method, req.Path, result.Err)
-			// Record as skip and continue — network errors should not halt the run.
-			allResults = append(allResults, predicate.Result{
-				Group:  "executor",
-				Name:   "request",
-				Status: "skip",
-				Detail: fmt.Sprintf("%s %s: %v", req.Method, req.Path, result.Err),
-			})
-			continue
-		}
+			// Execute the request.
+			result := executor.Execute(execCfg, req)
+			defer result.CloseResponses()
 
-		// Drain and close ALL response bodies so connections can be reused.
-		// For repeat-N/concurrent, Responses may contain multiple entries.
-		result.CloseResponses()
+			if result.Err != nil {
+				verbose("[%d/%d] %s %s -> ERROR: %v", idx+1, total, req.Method, req.Path, result.Err)
+				// Record as skip — network errors should not halt the run.
+				return []predicate.Result{{
+					Group:  "executor",
+					Name:   "request",
+					Status: "skip",
+					Detail: fmt.Sprintf("%s %s: %v", req.Method, req.Path, result.Err),
+				}}, false
+			}
 
-		// Use the relevance matrix to select only groups relevant to this
-		// mutation operator, instead of running every group (C-005 fix).
-		relevantGroups := resolveRelevantGroups(tagged.Operator, groups)
+			// Use the relevance matrix to select only groups relevant to this
+			// mutation operator, instead of running every group (C-005 fix).
+			relevantGroups := resolveRelevantGroups(tagged.Operator, groups)
 
-		// Run each relevant predicate group against the response.
-		for _, group := range relevantGroups {
-			var groupResults []predicate.Result
+			var iterResults []predicate.Result
 
-			// Classify which predicate types this group contains.
-			hasUniversal := false
-			hasRelational := false
-			hasSequential := false
-			for _, p := range group.Predicates {
-				switch p.Type {
-				case predicate.TypeUniversal:
-					hasUniversal = true
-				case predicate.TypeRelational:
-					hasRelational = true
-				case predicate.TypeSequential:
-					hasSequential = true
+			// Run each relevant predicate group against the response.
+			for _, group := range relevantGroups {
+				var groupResults []predicate.Result
+
+				// Classify which predicate types this group contains.
+				hasUniversal := false
+				hasRelational := false
+				hasSequential := false
+				for _, p := range group.Predicates {
+					switch p.Type {
+					case predicate.TypeUniversal:
+						hasUniversal = true
+					case predicate.TypeRelational:
+						hasRelational = true
+					case predicate.TypeSequential:
+						hasSequential = true
+					}
 				}
-			}
 
-			// Universal predicates: run against the response we already have.
-			if hasUniversal && result.Response != nil {
-				groupResults = append(groupResults, predicate.Run(group, result.Response)...)
-			}
+				// Universal predicates: run against the response we already have.
+				if hasUniversal && result.Response != nil {
+					groupResults = append(groupResults, predicate.Run(group, result.Response)...)
+				}
 
-			// Relational predicates: construct a request with evil Origin and execute.
-			if hasRelational {
-				httpReq, err := http.NewRequest("GET", url, nil)
-				if err == nil {
-					httpReq.Header.Set("Origin", "https://evil.example.com")
-					httpResp, err := client.Do(httpReq)
+				// Relational predicates: construct a request with evil Origin and execute.
+				if hasRelational {
+					httpReq, err := http.NewRequest("GET", url, nil)
 					if err == nil {
-						io.Copy(io.Discard, httpResp.Body)
-						httpResp.Body.Close()
-						groupResults = append(groupResults, predicate.RunWithRequest(group, httpReq, httpResp)...)
+						httpReq.Header.Set("Origin", "https://evil.example.com")
+						httpResp, err := client.Do(httpReq)
+						if err == nil {
+							// Design note: relational predicates inspect headers, not body.
+							// Draining httpResp.Body before RunWithRequest is intentional —
+							// it returns the connection to the pool. If a future predicate
+							// needs body content, restructure to read before drain.
+							io.Copy(io.Discard, httpResp.Body)
+							httpResp.Body.Close()
+							groupResults = append(groupResults, predicate.RunWithRequest(group, httpReq, httpResp)...)
+						}
 					}
 				}
-			}
 
-			// Sequential predicates: they manage their own requests.
-			if hasSequential {
-				groupResults = append(groupResults, predicate.RunMulti(group, client, url)...)
-			}
-
-			// Verbose progress output.
-			for _, r := range groupResults {
-				if verboseMode {
-					fmt.Fprintf(os.Stderr, "[%d/%d] %s %s [%s] -> %s: %s=%s (%s)\n",
-						idx+1, total, req.Method, req.Path, tagged.Operator,
-						r.Group, r.Name, r.Status, result.Duration)
+				// Sequential predicates: they manage their own requests.
+				if hasSequential {
+					groupResults = append(groupResults, predicate.RunMulti(group, client, url)...)
 				}
-			}
 
-			allResults = append(allResults, groupResults...)
-
-			// Fail-fast: stop on first failure.
-			if failFast {
+				// Verbose progress output.
 				for _, r := range groupResults {
-					if r.Status == "fail" {
-						stopped = true
-						break
+					if verboseMode {
+						fmt.Fprintf(os.Stderr, "[%d/%d] %s %s [%s] -> %s: %s=%s (%s)\n",
+							idx+1, total, req.Method, req.Path, tagged.Operator,
+							r.Group, r.Name, r.Status, result.Duration)
+					}
+				}
+
+				iterResults = append(iterResults, groupResults...)
+
+				// Fail-fast: stop on first failure.
+				if failFast {
+					for _, r := range groupResults {
+						if r.Status == "fail" {
+							return iterResults, true
+						}
 					}
 				}
 			}
+
+			return iterResults, false
+		}()
+
+		allResults = append(allResults, iterResults...)
+		if iterStopped {
+			stopped = true
 		}
 	}
 
@@ -1032,10 +1060,12 @@ Checks security headers, method semantics, CORS policy,
 cache behaviour, and common state-management issues.
 
 Flags:
-  -t, --target URL    Target URL (or positional)
-  -g, --groups LIST   Predicate groups (default: all)
-  --timeout DURATION  Per-request timeout (default: 10s)
-  -h, --help          Show this help
+  -t, --target URL         Target URL (or positional)
+  -g, --groups LIST        Predicate groups (default: all)
+  --timeout DURATION       Per-request timeout (default: 10s)
+  --max-body-size BYTES    Max response body to read (default: 10485760)
+  --max-redirects N        Maximum redirects to follow (default: 10)
+  -h, --help               Show this help
 `)
 		return
 	}
@@ -1043,9 +1073,44 @@ Flags:
 	args = stripGlobalFlags(args)
 
 	url := targetURL
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		url = args[0]
+	auditTimeout := 10 * time.Second
+	maxBodySize := int64(10 * 1024 * 1024)
+	maxRedirects := 10
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-t", "--target":
+			if i+1 < len(args) {
+				url = args[i+1]
+				i++
+			}
+		case "--timeout":
+			if i+1 < len(args) {
+				d, err := time.ParseDuration(args[i+1])
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: invalid timeout %q: %v\n", args[i+1], err)
+					os.Exit(1)
+				}
+				auditTimeout = d
+				i++
+			}
+		case "--max-body-size":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &maxBodySize)
+				i++
+			}
+		case "--max-redirects":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &maxRedirects)
+				i++
+			}
+		default:
+			if !strings.HasPrefix(args[i], "-") && url == "" {
+				url = args[i]
+			}
+		}
 	}
+
 	if url == "" {
 		fmt.Fprintf(os.Stderr, "error: target URL required\n")
 		fmt.Fprintf(os.Stderr, "Usage: hax audit <url>\n")
@@ -1070,10 +1135,11 @@ Flags:
 		Method: "GET",
 		Path:   path,
 	}
-	cfg := executor.Config{
-		BaseURL: baseURL,
-		Timeout: 10 * time.Second,
-	}
+	cfg := executor.DefaultConfig()
+	cfg.BaseURL = baseURL
+	cfg.Timeout = auditTimeout
+	cfg.MaxBodySize = maxBodySize
+	cfg.MaxRedirects = maxRedirects
 
 	result := executor.Execute(cfg, req)
 	if result.Err != nil {
@@ -1086,7 +1152,7 @@ Flags:
 	defer result.CloseResponses()
 
 	// Run all predicate groups against the response.
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: auditTimeout}
 	var results []predicate.Result
 	for _, group := range predicate.AllGroups() {
 		// Type 1 (Universal): single-response predicates.
@@ -1255,13 +1321,13 @@ Examples:
 		groups = predicate.AllGroups()
 	}
 
-	// Set up executor config.
-	execCfg := executor.Config{
-		BaseURL: url,
-		Timeout: 10 * time.Second,
-	}
-	client := &http.Client{Timeout: execCfg.Timeout}
-	execCfg.Client = client
+	// Set up executor config. The executor creates its own http.Client
+	// with redirect policy enforcement -- no external client injection.
+	execCfg := executor.DefaultConfig()
+	execCfg.BaseURL = url
+	// A standalone client for Type 3 (Sequential) predicates that
+	// manage their own requests outside the executor.
+	seqClient := &http.Client{Timeout: execCfg.Timeout}
 
 	// Build the CheckFunc: execute the request and run predicates.
 	checkFn := func(r request.Request) (predicate.Result, error) {
@@ -1297,7 +1363,7 @@ Examples:
 					}
 				case predicate.TypeSequential:
 					if p.MultiFn != nil {
-						pr = p.MultiFn(client, url)
+						pr = p.MultiFn(seqClient, url)
 					}
 				}
 				if pr.Status == "fail" {

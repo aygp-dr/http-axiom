@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -356,16 +357,16 @@ func TestExecuteBatchSharesClient(t *testing.T) {
 		t.Errorf("server received %d requests, want 10", got)
 	}
 
-	// Verify that providing a pre-built client is honoured.
-	customClient := &http.Client{Timeout: 5 * time.Second}
+	// Verify that a second batch with different config also works.
+	// (Client field was removed; the executor always creates its own client.)
 	cfg2 := DefaultConfig()
 	cfg2.BaseURL = srv.URL
-	cfg2.Client = customClient
+	cfg2.Timeout = 5 * time.Second
 
 	results2 := ExecuteBatch(cfg2, reqs[:2])
 	for i, r := range results2 {
 		if r.Err != nil {
-			t.Errorf("custom client result[%d]: unexpected error: %v", i, r.Err)
+			t.Errorf("second batch result[%d]: unexpected error: %v", i, r.Err)
 		}
 	}
 }
@@ -434,5 +435,375 @@ func TestExecuteBatchConcurrent(t *testing.T) {
 	}
 	if peak > 3 {
 		t.Errorf("expected at most 3 concurrent requests (semaphore), peak was %d", peak)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Body limit tests (P0-2)
+// ---------------------------------------------------------------------------
+
+// mockReadCloser records whether Close was called.
+type mockReadCloser struct {
+	data   *strings.Reader
+	closed bool
+}
+
+func (m *mockReadCloser) Read(p []byte) (int, error) {
+	return m.data.Read(p)
+}
+
+func (m *mockReadCloser) Close() error {
+	m.closed = true
+	return nil
+}
+
+func TestLimitedBody_CloseCallsOriginal(t *testing.T) {
+	original := &mockReadCloser{data: strings.NewReader("hello world")}
+	lb := &limitedBody{
+		Reader:   io.LimitReader(original, 5),
+		original: original,
+	}
+
+	// Read limited bytes.
+	buf := make([]byte, 20)
+	n, _ := lb.Read(buf)
+	if n != 5 {
+		t.Errorf("expected to read 5 bytes, got %d", n)
+	}
+
+	// Close must delegate to original.
+	if err := lb.Close(); err != nil {
+		t.Fatalf("unexpected error from Close: %v", err)
+	}
+	if !original.closed {
+		t.Error("Close() did not call original.Close()")
+	}
+}
+
+func TestExecute_LargeResponseBodyLimited(t *testing.T) {
+	// Server returns 8KB of data.
+	payload := strings.Repeat("A", 8*1024)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.MaxBodySize = 1024 // limit to 1KB
+
+	req := request.Request{
+		Method:  http.MethodGet,
+		Path:    "/big",
+		Headers: map[string]string{},
+	}
+
+	result := Execute(cfg, req)
+	if result.Err != nil {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+	defer result.CloseResponses()
+
+	body, err := io.ReadAll(result.Response.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+	if len(body) != 1024 {
+		t.Errorf("expected body length 1024, got %d", len(body))
+	}
+}
+
+func TestExecute_MaxBodySizeZeroNoLimit(t *testing.T) {
+	// Server returns 4KB of data.
+	payload := strings.Repeat("B", 4*1024)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.MaxBodySize = 0 // unlimited
+
+	req := request.Request{
+		Method:  http.MethodGet,
+		Path:    "/unlimited",
+		Headers: map[string]string{},
+	}
+
+	result := Execute(cfg, req)
+	if result.Err != nil {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+	defer result.CloseResponses()
+
+	body, err := io.ReadAll(result.Response.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+	if len(body) != 4*1024 {
+		t.Errorf("expected body length %d, got %d", 4*1024, len(body))
+	}
+}
+
+func TestDefaultConfig_MaxBodySize(t *testing.T) {
+	cfg := DefaultConfig()
+	expectedMaxBodySize := int64(10 * 1024 * 1024)
+	if cfg.MaxBodySize != expectedMaxBodySize {
+		t.Errorf("DefaultConfig().MaxBodySize = %d, want %d", cfg.MaxBodySize, expectedMaxBodySize)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Redirect policy tests (P0-3)
+// ---------------------------------------------------------------------------
+
+// TestExecute_MaxRedirects0_FollowsZero verifies that MaxRedirects=0
+// means zero redirects are followed: a 302 response is returned as-is.
+func TestExecute_MaxRedirects0_FollowsZero(t *testing.T) {
+	var requestCount int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/end", http.StatusFound)
+		case "/end":
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.MaxRedirects = 0
+
+	req := request.Request{
+		Method:  http.MethodGet,
+		Path:    "/start",
+		Headers: map[string]string{},
+	}
+
+	result := Execute(cfg, req)
+	defer result.CloseResponses()
+	if result.Err != nil {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+
+	// With MaxRedirects=0, only the initial request should be made.
+	got := atomic.LoadInt64(&requestCount)
+	if got != 1 {
+		t.Errorf("server received %d requests, want 1 (no redirects followed)", got)
+	}
+
+	// The response should be the 302, not the final 200.
+	if result.Response.StatusCode != http.StatusFound {
+		t.Errorf("expected status 302, got %d", result.Response.StatusCode)
+	}
+}
+
+// TestExecute_MaxRedirects1_FollowsExactlyOne verifies that
+// MaxRedirects=1 follows exactly one redirect. Given a chain
+// /a -> 302 /b -> 302 /c, we should see 2 requests and get
+// /b's 302 response (the redirect from /b to /c is not followed).
+func TestExecute_MaxRedirects1_FollowsExactlyOne(t *testing.T) {
+	var requestCount int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+		switch r.URL.Path {
+		case "/a":
+			http.Redirect(w, r, "/b", http.StatusFound)
+		case "/b":
+			http.Redirect(w, r, "/c", http.StatusFound)
+		case "/c":
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.MaxRedirects = 1
+
+	req := request.Request{
+		Method:  http.MethodGet,
+		Path:    "/a",
+		Headers: map[string]string{},
+	}
+
+	result := Execute(cfg, req)
+	defer result.CloseResponses()
+	if result.Err != nil {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+
+	// /a -> /b is followed (1 redirect), /b -> /c is NOT followed.
+	got := atomic.LoadInt64(&requestCount)
+	if got != 2 {
+		t.Errorf("server received %d requests, want 2 (follow exactly 1 redirect)", got)
+	}
+
+	// We should get /b's 302 response (the limit was hit before /c).
+	if result.Response.StatusCode != http.StatusFound {
+		t.Errorf("expected status 302 (from /b), got %d", result.Response.StatusCode)
+	}
+}
+
+// TestExecute_MaxRedirects0_And_1_Different is a regression test
+// proving that MaxRedirects=0 and MaxRedirects=1 produce different
+// request counts, catching the off-by-one bug where >= was used
+// instead of >.
+func TestExecute_MaxRedirects0_And_1_Different(t *testing.T) {
+	var requestCount0 int64
+	var requestCount1 int64
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/middle", http.StatusFound)
+		case "/middle":
+			http.Redirect(w, r, "/end", http.StatusFound)
+		case "/end":
+			w.WriteHeader(http.StatusOK)
+		}
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount0, 1)
+		handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	// MaxRedirects=0: only 1 request.
+	cfg0 := DefaultConfig()
+	cfg0.BaseURL = srv.URL
+	cfg0.MaxRedirects = 0
+
+	req := request.Request{
+		Method:  http.MethodGet,
+		Path:    "/start",
+		Headers: map[string]string{},
+	}
+
+	result0 := Execute(cfg0, req)
+	result0.CloseResponses()
+
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount1, 1)
+		handler.ServeHTTP(w, r)
+	}))
+	defer srv2.Close()
+
+	// MaxRedirects=1: 2 requests (follows one redirect).
+	cfg1 := DefaultConfig()
+	cfg1.BaseURL = srv2.URL
+	cfg1.MaxRedirects = 1
+
+	result1 := Execute(cfg1, req)
+	result1.CloseResponses()
+
+	count0 := atomic.LoadInt64(&requestCount0)
+	count1 := atomic.LoadInt64(&requestCount1)
+
+	if count0 == count1 {
+		t.Errorf("MaxRedirects=0 and MaxRedirects=1 produced the same request count (%d); off-by-one bug", count0)
+	}
+	if count0 != 1 {
+		t.Errorf("MaxRedirects=0: expected 1 request, got %d", count0)
+	}
+	if count1 != 2 {
+		t.Errorf("MaxRedirects=1: expected 2 requests, got %d", count1)
+	}
+}
+
+// TestExecute_CrossHostRedirect_StripsAuth verifies that Authorization
+// and Cookie headers are stripped when following a redirect to a
+// different host.
+func TestExecute_CrossHostRedirect_StripsAuth(t *testing.T) {
+	// Target server: records headers it receives.
+	var receivedAuth string
+	var receivedCookie string
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		receivedCookie = r.Header.Get("Cookie")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer targetSrv.Close()
+
+	// Origin server: redirects to the target server (cross-host).
+	originSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, targetSrv.URL+"/landed", http.StatusFound)
+	}))
+	defer originSrv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = originSrv.URL
+	cfg.MaxRedirects = 5
+
+	req := request.Request{
+		Method: http.MethodGet,
+		Path:   "/redirect-me",
+		Headers: map[string]string{
+			"Authorization": "Bearer secret-token",
+			"Cookie":        "session=abc123",
+		},
+	}
+
+	result := Execute(cfg, req)
+	defer result.CloseResponses()
+	if result.Err != nil {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+
+	if receivedAuth != "" {
+		t.Errorf("Authorization header leaked to cross-host redirect: %q", receivedAuth)
+	}
+	if receivedCookie != "" {
+		t.Errorf("Cookie header leaked to cross-host redirect: %q", receivedCookie)
+	}
+}
+
+// TestExecute_SameHostRedirect_PreservesAuth verifies that
+// Authorization and Cookie headers are preserved when following a
+// redirect to the same host.
+func TestExecute_SameHostRedirect_PreservesAuth(t *testing.T) {
+	var receivedAuth string
+	var receivedCookie string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/end", http.StatusFound)
+		case "/end":
+			receivedAuth = r.Header.Get("Authorization")
+			receivedCookie = r.Header.Get("Cookie")
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = srv.URL
+	cfg.MaxRedirects = 5
+
+	req := request.Request{
+		Method: http.MethodGet,
+		Path:   "/start",
+		Headers: map[string]string{
+			"Authorization": "Bearer secret-token",
+			"Cookie":        "session=abc123",
+		},
+	}
+
+	result := Execute(cfg, req)
+	defer result.CloseResponses()
+	if result.Err != nil {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+
+	if receivedAuth != "Bearer secret-token" {
+		t.Errorf("Authorization header not preserved on same-host redirect: got %q", receivedAuth)
+	}
+	if receivedCookie != "session=abc123" {
+		t.Errorf("Cookie header not preserved on same-host redirect: got %q", receivedCookie)
 	}
 }
