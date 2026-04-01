@@ -93,10 +93,12 @@ func makeCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request) er
 	}
 }
 
-// newClient creates an *http.Client from the given Config, wiring
-// Timeout and the redirect policy. All request execution flows
-// through this helper -- there is no way to inject a pre-built client.
-func newClient(cfg Config) *http.Client {
+// NewClient creates an *http.Client from this Config, wiring Timeout
+// and the redirect policy. All request execution -- inside the
+// executor and in main.go command handlers -- should flow through
+// this method so that redirect-limit and timeout policies are never
+// accidentally omitted.
+func (cfg Config) NewClient() *http.Client {
 	return &http.Client{
 		Timeout:       cfg.Timeout,
 		CheckRedirect: makeCheckRedirect(cfg.MaxRedirects),
@@ -105,7 +107,7 @@ func newClient(cfg Config) *http.Client {
 
 // Execute sends a single request and returns the result.
 func Execute(cfg Config, req request.Request) Result {
-	return executeSingle(newClient(cfg), cfg, req)
+	return executeSingle(cfg.NewClient(), cfg, req)
 }
 
 // ExecuteBatch sends multiple requests, sharing a single http.Client
@@ -114,9 +116,9 @@ func Execute(cfg Config, req request.Request) Result {
 // the number of in-flight goroutines.
 func ExecuteBatch(cfg Config, reqs []request.Request) []Result {
 	// Share a single client across the batch for connection reuse.
-	// The client is created via newClient so the redirect policy is
+	// The client is created via NewClient so the redirect policy is
 	// always enforced; there is no way to bypass it with a pre-built client.
-	client := newClient(cfg)
+	client := cfg.NewClient()
 
 	results := make([]Result, len(reqs))
 

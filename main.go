@@ -509,10 +509,10 @@ Flags:
 	verbose("checking %d group(s) against %s", len(groups), url)
 
 	// Set up executor config. The executor creates its own http.Client
-	// with redirect policy enforcement via newClient().
+	// with redirect policy enforcement via NewClient().
 	execCfg := executor.DefaultConfig()
 	execCfg.BaseURL = url
-	client := &http.Client{Timeout: execCfg.Timeout}
+	client := execCfg.NewClient()
 
 	var allResults []predicate.Result
 
@@ -779,7 +779,7 @@ Flags:
 	execCfg.Concurrency = concurrency
 	execCfg.MaxRedirects = maxRedirects
 	execCfg.MaxBodySize = maxBodySize
-	client := &http.Client{Timeout: timeout}
+	client := execCfg.NewClient()
 
 	var allResults []predicate.Result
 	total := len(mutated)
@@ -1152,7 +1152,7 @@ Flags:
 	defer result.CloseResponses()
 
 	// Run all predicate groups against the response.
-	client := &http.Client{Timeout: auditTimeout}
+	client := cfg.NewClient()
 	var results []predicate.Result
 	for _, group := range predicate.AllGroups() {
 		// Type 1 (Universal): single-response predicates.
@@ -1327,7 +1327,7 @@ Examples:
 	execCfg.BaseURL = url
 	// A standalone client for Type 3 (Sequential) predicates that
 	// manage their own requests outside the executor.
-	seqClient := &http.Client{Timeout: execCfg.Timeout}
+	seqClient := execCfg.NewClient()
 
 	// Build the CheckFunc: execute the request and run predicates.
 	checkFn := func(r request.Request) (predicate.Result, error) {
@@ -1472,7 +1472,9 @@ Checks:
 
 	// Check: can resolve DNS.
 	checks++
-	client := &http.Client{Timeout: 5 * time.Second}
+	doctorCfg := executor.DefaultConfig()
+	doctorCfg.Timeout = 5 * time.Second
+	client := doctorCfg.NewClient()
 	_, err := client.Head("https://httpbin.org/get")
 	if err != nil {
 		results = append(results, doctorCheck{"network", "warn", fmt.Sprintf("cannot reach httpbin.org: %v", err)})
