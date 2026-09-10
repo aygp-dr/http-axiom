@@ -69,12 +69,12 @@
 
 (def app
   (ring/ring-handler
-    (ring/router
-      [["/" {:get {:handler index-page}}]
-       ["/api/todos"
-        {:get  {:handler list-todos}
-         :post {:handler create-todo}}]
-       ["/api/todos/:id"
-        {:get    {:handler get-todo}
-         :put    {:handler update-todo}
-         :delete {:handler delete-todo}}]])))
+   (ring/router
+    [["/" {:get {:handler index-page}}]
+     ["/api/todos"
+      {:get  {:handler list-todos}
+       :post {:handler create-todo}}]
+     ["/api/todos/:id"
+      {:get    {:handler get-todo}
+       :put    {:handler update-todo}
+       :delete {:handler delete-todo}}]])))
