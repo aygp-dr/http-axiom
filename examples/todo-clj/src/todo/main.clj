@@ -2,7 +2,8 @@
   (:require [todo.db :as db]
             [todo.routes :as routes]
             [todo.middleware :as mw]
-            [ring.adapter.jetty :as jetty]))
+            [ring.adapter.jetty :as jetty]
+            [clojure.spec.alpha :as s]))
 
 (defn -main
   [& _args]
@@ -11,3 +12,6 @@
   (println "WARNING: deliberately insecure -- no security headers, no auth, no CORS")
   (jetty/run-jetty (mw/wrap-epoch-0 routes/app)
                    {:port 8080 :join? true}))
+
+(s/fdef -main
+  :args (s/* string?))
