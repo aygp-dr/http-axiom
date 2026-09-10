@@ -53,7 +53,7 @@
   "Insert a new todo. Returns the created row."
   [{:keys [title done] :or {done 0}}]
   (let [result (jdbc/execute-one! @datasource
-                                  ["INSERT INTO todos (title, done) VALUES (?, ?)" title done]
+                                  ["INSERT INTO todos (title, done) VALUES (?, ?)" title (or done 0)]
                                   {:return-keys true
                                    :builder-fn rs/as-unqualified-lower-maps})]
     ;; SQLite returns the generated key; fetch the full row

@@ -80,6 +80,15 @@
     (is (= 404 (:status (check-ret `routes/update-todo (app (request :put "/api/todos/999" {:title "x"}))))))
     (is (= 404 (:status (check-ret `routes/delete-todo (app (request :delete "/api/todos/abc"))))))))
 
+(deftest null-done-is-stored-as-0
+  ;; Found by db_test's stest/check: (db/create-todo! {:title "" :done nil})
+  ;; hit NOT NULL on todos.done, so POST {"done": null} threw instead of
+  ;; returning 201. PUT already stored a null done as 0.
+  (let [resp (check-ret `routes/create-todo
+                        (app (request :post "/api/todos" {:title "Buy milk" :done nil})))]
+    (is (= 201 (:status resp)))
+    (is (= {:title "Buy milk" :done 0} (dissoc (json-body resp) :id)))))
+
 (deftest epoch-0-sends-no-security-headers
   ;; spec.org A2.3: at epoch 0 every security header is absent, on success
   ;; and error responses alike. hax scenario S-001 expects exactly this.
